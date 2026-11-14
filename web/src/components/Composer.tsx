@@ -1,5 +1,6 @@
 import { haptic } from '../haptics';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { api, type Chat, type Message } from '../api';
 import { duration } from '../util';
 import { Icon } from './Icon';
@@ -31,6 +32,11 @@ function mentionQuery(text: string, caret: number): { at: number; q: string } | 
   if (q.length > 30 || /\n/.test(q) || /\s$/.test(q)) return null;
   return { at, q };
 }
+
+// Vollbild-Fenster (Immich, Nextcloud, GIF, Editoren, Planen) direkt an <body> hängen: Die glasige
+// Eingabeleiste (.chat-dock mit backdrop-filter) wird sonst zum Bezugsrahmen für position: fixed,
+// und die Fenster landen eingesperrt in bzw. unter der Leiste.
+const toBody = (n: ReactNode) => createPortal(n, document.body);
 
 export function Composer({ chat, onPickLang, draftId, serverDraft, placeholder, onResize, disabled, replyTo, editing, inject, onAi, aiOpen, onCancel, onSent, onError, onInfo, onEmpty }: {
   chat: Chat; onPickLang?: () => void; draftId?: string; serverDraft?: { text: string | null; ts: number | null }; placeholder?: string; onResize?: () => void; disabled: boolean; onInfo?: (t: string) => void; replyTo: Message | null; editing: Message | null; inject?: { text: string; n: number } | null; onAi?: () => void; aiOpen?: boolean; onEmpty?: (empty: boolean) => void;
@@ -297,8 +303,8 @@ export function Composer({ chat, onPickLang, draftId, serverDraft, placeholder, 
 
   return (
     <footer className="composer-wrap">
-      {when && <WhenPicker title={T('Später senden')} confirm={T('Planen')} hint={T('„{0}{1}“ wird automatisch gesendet{2}.', text.trim().slice(0, 80), text.trim().length > 80 ? '…' : '', canTr && !noTr ? T(', übersetzt auf {0}', tr!.langName) : '')}
-        onPick={schedule} onClose={() => setWhen(false)} />}
+      {when && toBody(<WhenPicker title={T('Später senden')} confirm={T('Planen')} hint={T('„{0}{1}“ wird automatisch gesendet{2}.', text.trim().slice(0, 80), text.trim().length > 80 ? '…' : '', canTr && !noTr ? T(', übersetzt auf {0}', tr!.langName) : '')}
+        onPick={schedule} onClose={() => setWhen(false)} />)}
       {canTr && !editing && (
         <div className="tr-chip">
           <Icon name="globe" size={15} />
@@ -342,12 +348,12 @@ export function Composer({ chat, onPickLang, draftId, serverDraft, placeholder, 
         </div>
       )}
       {editIdx != null && files[editIdx] && isVideo(files[editIdx]) && (
-        <VideoEditor file={files[editIdx]} initial={vEdits.get(files[editIdx])} onCancel={() => setEditIdx(null)}
-          onDone={(ed) => { const f = files[editIdx]; setVEdits((m) => { const n = new Map(m); if (ed) n.set(f, ed); else n.delete(f); return n; }); setEditIdx(null); }} />
+        toBody(<VideoEditor file={files[editIdx]} initial={vEdits.get(files[editIdx])} onCancel={() => setEditIdx(null)}
+          onDone={(ed) => { const f = files[editIdx]; setVEdits((m) => { const n = new Map(m); if (ed) n.set(f, ed); else n.delete(f); return n; }); setEditIdx(null); }} />)
       )}
       {editIdx != null && files[editIdx] && !isVideo(files[editIdx]) && (
-        <ImageEditor file={files[editIdx]} onCancel={() => setEditIdx(null)}
-          onDone={(nf) => { setFiles((fs) => fs.map((x, j) => (j === editIdx ? nf : x))); setEditIdx(null); }} />
+        toBody(<ImageEditor file={files[editIdx]} onCancel={() => setEditIdx(null)}
+          onDone={(nf) => { setFiles((fs) => fs.map((x, j) => (j === editIdx ? nf : x))); setEditIdx(null); }} />)
       )}
       {mMatches.length > 0 && (
         <div className="mention-menu menu-list" role="listbox">
@@ -371,12 +377,12 @@ export function Composer({ chat, onPickLang, draftId, serverDraft, placeholder, 
           {!editing && <button onClick={() => { setAttMenu(false); setEmoji(false); setGifPick(true); }}><span className="gif-badge menu-gif">GIF</span>{T('GIF senden')}</button>}
         </div>
       </>}
-      {gifPick && <GifPicker onClose={() => setGifPick(false)} onPick={(g) => {
+      {gifPick && toBody(<GifPicker onClose={() => setGifPick(false)} onPick={(g) => {
         setGifPick(false); onSent();
         api.sendGif(chat.id, g.id, replyTo?.remoteId).catch((e: any) => onError(e.message));
-      }} />}
-      {imPick && <ImmichPicker onClose={() => setImPick(false)} onPick={(add) => setFiles((f) => [...f, ...add])} />}
-      {ncPick && <NextcloudBrowser mode="pick" onClose={() => setNcPick(false)} onPick={(add) => setFiles((f) => [...f, ...add])} />}
+      }} />)}
+      {imPick && toBody(<ImmichPicker onClose={() => setImPick(false)} onPick={(add) => setFiles((f) => [...f, ...add])} />)}
+      {ncPick && toBody(<NextcloudBrowser mode="pick" onClose={() => setNcPick(false)} onPick={(add) => setFiles((f) => [...f, ...add])} />)}
       {rec ? (
         <div className="composer recording">
           <button className="icon-btn" onClick={() => stopRec(true)} aria-label="Verwerfen"><Icon name="trash" /></button>
