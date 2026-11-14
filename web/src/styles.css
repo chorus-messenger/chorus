@@ -445,6 +445,14 @@ button.st.failed { all: unset; display: inline-flex; color: #fca5a5; cursor: poi
 @media (max-width: 480px) { .player-time { display: none; } .player-info { max-width: 40%; } }
 /* ---------- Neue Nachricht ---------- */
 .pane-list { position: relative; }
+/* Glas-Kopf wie bei Signal: Liste scrollt unter dem stehenden Kopf durch, Suche scrollt mit weg */
+.list-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.pane-list .chats { overflow: visible; flex: none; min-height: auto; }
+.list-scroll > .list-head { position: sticky; top: 0; z-index: 3;
+  background: color-mix(in srgb, var(--bg) 72%, transparent); -webkit-backdrop-filter: saturate(1.8) blur(20px); backdrop-filter: saturate(1.8) blur(20px); }
+.list-scroll > .list-head::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--line); opacity: 0; transition: opacity .2s; }
+.list-scroll.scrolled > .list-head::after { opacity: 1; }
+.list-scroll > .search { transform-origin: 50% 0; }
 .new-btn { white-space: nowrap; flex-shrink: 0; }
 .new-btn.compact { padding: 6px 8px; }
 .new-btn.compact .new-btn-label { display: none; }
