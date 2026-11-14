@@ -293,7 +293,7 @@ export function ChatView({ chat, account, messages, onBack, loadOlder, onPatchCh
 
   return (
     <div className={`chat-view${theme.bg ? ' own-bg' : ''}${pin ? ' has-pin' : ''}`} style={chatThemeStyle(theme) as React.CSSProperties | undefined} data-net={chat.network} onDragOver={(e) => e.preventDefault()}>
-      <div className="chat-top" ref={topRef}>
+      <div className="chat-glass-top" ref={topRef}>
       <header className={`chat-head${chat.network === 'email' ? ' mail' : ''}`}>
         <button className="icon-btn back" onClick={onBack} aria-label={T('Zurück')}><Icon name="back" /></button>
         <button className="chat-head-who" onClick={() => setContact(true)} aria-label={T('Profil anzeigen')}>
