@@ -64,6 +64,7 @@ interface Ctx {
   autopilot: AutopilotRunner | null;
   translator: Translator | null;
   planner: Planner | null;
+  contactsTimer?: ReturnType<typeof setInterval>;
   sockets: Set<import('ws').WebSocket>;
   pendingTotp: { secret: string; sid: string } | null;
   lastTotpStep: number;
@@ -86,6 +87,11 @@ function ctxOf(p: ProfileEntry): Ctx {
     ctx.planner = new Planner(hub, (title, body, chatId) => pushUnlessOpen(ctx, (only, skip) => push.send(store, { title, body, chatId, tag: 'reminder-' + chatId }, only, skip)),
       (p) => sendMaybeTranslated(hub, ctx.ai!, p.chatId, p.text, p.replyTo ?? null, !!p.translate));
     hub.subscribe((e) => broadcast(ctx, e));
+    // Kontakte (CardDAV) alle 6 Stunden neu laden, falls eingeschaltet
+    clearInterval(ctx.contactsTimer);
+    const syncContacts = () => { const o = new Organize(store); if (o.settings.contacts && Date.now() - o.settings.contactsAt > 5.5 * 3600_000) o.syncContacts().catch((e) => console.warn('[kontakte]', e?.message ?? e)); };
+    ctx.contactsTimer = setInterval(syncContacts, 3600_000);
+    setTimeout(syncContacts, 30_000);
     // Push an jedes Gerät, auf dem Chorus gerade nicht offen und sichtbar ist. Das offene Gerät zeigt selbst einen dezenten Hinweis.
     // Früher reichte ein offenes Gerät (z. B. der Desktop), um die Push-Nachricht an alle Geräte zu unterdrücken.
     hub.subscribe((e) => { if (e.type === 'notify') pushUnlessOpen(ctx, (only, skip) => push.notify(store, e.chat, e.message, skip, only)); });
@@ -399,7 +405,7 @@ app.delete('/api/profiles/:id', async (req) => {
   if (id === C(req).p.id) throw Object.assign(new Error('Du kannst dein eigenes Profil nicht löschen'), { statusCode: 400 });
   const other = ctxs.get(id);
   if (other) {
-    other.planner?.stop(); await other.hub?.stopAll(); other.hub?.store.close();
+    other.planner?.stop(); clearInterval(other.contactsTimer); await other.hub?.stopAll(); other.hub?.store.close();
     for (const ws of other.sockets) ws.close(4401, 'Profil gelöscht');
     ctxs.delete(id);
   }
@@ -894,6 +900,8 @@ const O = (req: FastifyRequest) => new Organize(H(req).store);
 app.get('/api/organize', async (req) => O(req).publicSettings());
 app.put('/api/organize', async (req) => O(req).update((req.body ?? {}) as any));
 app.get('/api/organize/calendars', async (req) => O(req).calendars());
+app.get('/api/organize/addressbooks', async (req) => O(req).addressBooks());
+app.post('/api/organize/contacts/sync', async (req) => ({ message: await O(req).syncContacts(), settings: O(req).publicSettings() }));
 app.get('/api/organize/bring/lists', async (req) => O(req).bringLists());
 const evBody = (b: any) => ({ title: String(b?.title ?? '').slice(0, 200).trim(), start: String(b?.start ?? ''), end: String(b?.end ?? ''), allDay: !!b?.allDay, location: String(b?.location ?? '').slice(0, 200), note: String(b?.note ?? '').slice(0, 2000) });
 const okWhen = (v: string, allDay: boolean) => (allDay ? /^\d{4}-\d{2}-\d{2}$/ : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/).test(v);

@@ -1353,3 +1353,15 @@ html .chat-view.own-bg { background: var(--chat-bg-own); }
 html.shape-square .fab { border-radius: 8px; }
 html.shape-compact .fab { width: 50px; height: 50px; border-radius: 15px; }
 
+
+/* Einstellungen → Verbindungen */
+.conn-pick { display: grid; grid-template-columns: auto 1fr auto minmax(0, 46%); align-items: center; gap: 10px; }
+.conn-pick + .conn-pick { padding-top: 12px; border-top: 1px solid var(--ios-sep); }
+.conn-pick-text { display: grid; min-width: 0; }
+.conn-pick-text small { color: var(--ink-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conn-pick .input { min-width: 0; }
+.conn-pick:not(:has(.icon-btn)) { grid-template-columns: auto 1fr minmax(0, 46%); }
+.ios-card.pad > .key-saved { min-width: 0; }
+.ios-card.pad > .key-saved .key-ok { min-width: 0; }
+.key-ok .trunc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ios-card.pad > .key-saved .btn { flex: none; }

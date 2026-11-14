@@ -11,7 +11,7 @@ import { TwoFactor } from './TwoFactor';
 import { ProfilesSection } from './Profiles';
 import { MyProfile } from './MyProfile';
 import { BackupSection } from './Backup';
-import { StorageSection } from './StorageSettings';
+import { ConnectionsList, ConnectionPage, CONN_TITLES, type ConnKind } from './Connections';
 import { useStorage } from '../storageState';
 import { BubbleSection } from './BubbleSettings';
 import { AdminSection } from './AdminSection';
@@ -26,10 +26,10 @@ const STATE_TEXT: Record<Account['status']['state'], string> = {
   connected: T('Verbunden'), connecting: T('Verbinde …'), disconnected: T('Getrennt'), need_input: T('Anmeldung offen'), qr: T('QR-Code scannen'), error: T('Fehler'),
 };
 
-type Page = 'me' | 'stats' | 'accounts' | 'lang' | 'ai' | 'push' | 'look' | 'backup' | 'storage' | 'security' | 'profiles' | 'server' | 'about' | `acc:${string}`;
+type Page = 'me' | 'stats' | 'accounts' | 'lang' | 'ai' | 'push' | 'look' | 'backup' | 'storage' | 'security' | 'profiles' | 'server' | 'about' | `acc:${string}` | `conn:${ConnKind}`;
 
 const TITLES: Record<string, string> = {
-  me: T('Mein Profil'), stats: T('Statistik'), accounts: T('Messenger'), lang: T('Sprache'), ai: T('KI-Assistent'), push: T('Benachrichtigungen'), look: T('Darstellung'), backup: T('Sicherung'), storage: T('Speicherorte'),
+  me: T('Mein Profil'), stats: T('Statistik'), accounts: T('Messenger'), lang: T('Sprache'), ai: T('KI-Assistent'), push: T('Benachrichtigungen'), look: T('Darstellung'), backup: T('Sicherung'), storage: T('Verbindungen'),
   security: T('Sicherheit'), profiles: T('Profile'), server: T('Server'), about: T('Über Chorus'),
 };
 
@@ -60,7 +60,7 @@ export function Settings({ server, accounts, onClose, onAdd, onLocked, onProfile
   const [comfort, setComfort] = useState(me.comfort);
   const pid = me.id;
   const st = useStorage();
-  const storeVal = [st?.immich.enabled && 'Immich', st?.nextcloud.enabled && 'Nextcloud'].filter(Boolean).join(', ');
+  const storeVal = [st?.nextcloud.enabled && 'Nextcloud', st?.immich.enabled && 'Immich'].filter(Boolean).join(', ');
   const [pw, setPw] = useState({ a: '', b: '', msg: '' });
   const [page, setPage] = useState<Page | null>(null);
   const [sync, setSync] = useState<'idle' | 'busy' | 'fail'>('idle');
@@ -73,7 +73,7 @@ export function Settings({ server, accounts, onClose, onAdd, onLocked, onProfile
   const anim = useExit(!!page, 320);
   const shown = page ?? last;
   const go = (p: Page) => { setLast(p); setPage(p); };
-  const back = () => { if (shown?.startsWith('acc:')) go('accounts'); else setPage(null); };
+  const back = () => { if (shown?.startsWith('acc:')) go('accounts'); else if (shown?.startsWith('conn:')) go('storage'); else setPage(null); };
 
   // Vom linken Rand nach rechts wischen = zurück (wie unter iOS)
   const pageRef = useRef<HTMLDivElement>(null);
@@ -112,11 +112,13 @@ export function Settings({ server, accounts, onClose, onAdd, onLocked, onProfile
   const pushOn = localStorage.getItem('inbox:push') === '1';
   const bubbleMode = loadAccent().name;
   const acc = shown?.startsWith('acc:') ? accounts.find((a) => a.id === shown.slice(4)) : undefined;
-  const title = acc ? acc.label : shown ? TITLES[shown] : '';
+  const conn = shown?.startsWith('conn:') ? shown.slice(5) as ConnKind : undefined;
+  const title = acc ? acc.label : conn ? CONN_TITLES[conn] : shown ? TITLES[shown as keyof typeof TITLES] : '';
 
   const renderPage = () => {
     if (!shown) return null;
     if (acc) return <AccountPage acc={acc} onBack={back} />;
+    if (conn) return <ConnectionPage kind={conn} />;
     switch (shown) {
       case 'lang': return (
         <>
@@ -136,7 +138,7 @@ export function Settings({ server, accounts, onClose, onAdd, onLocked, onProfile
       case 'push': return <div className="ios-card pad"><PushSection /></div>;
       case 'look': return <BubbleSection nets={[...new Set(accounts.map((a) => a.network))]} />;
       case 'backup': return <div className="ios-card pad"><BackupSection /></div>;
-      case 'storage': return <div className="ios-card pad"><StorageSection /></div>;
+      case 'storage': return <ConnectionsList onOpen={(k) => go(`conn:${k}`)} />;
       case 'profiles': return <div className="ios-card pad"><ProfilesSection key={`${me.name}:${me.avatar}`} server={server} onRenamed={onProfileChanged} /></div>;
       case 'server': return <div className="ios-card pad"><AdminSection /></div>;
       case 'about': return (
@@ -213,7 +215,7 @@ export function Settings({ server, accounts, onClose, onAdd, onLocked, onProfile
 
             <div className="ios-card">
               <Row tile={<Tile color="#30b0c7" icon="cloud" />} title={T('Sicherung')} onClick={() => go('backup')} />
-              <Row tile={<Tile color="#ff9f0a" icon="folder" />} title={T('Speicherorte')} sub={T('Immich, Nextcloud, Bring!')} value={storeVal || undefined} onClick={() => go('storage')} />
+              <Row tile={<Tile color="#0082c9" icon="link" />} title={T('Verbindungen')} sub={T('Nextcloud, Immich, Bring!')} value={storeVal || undefined} onClick={() => go('storage')} />
             </div>
 
             <div className="ios-card">
