@@ -82,7 +82,15 @@ if (vv) {
     root.style.setProperty('--vvt', `${vv.offsetTop}px`);
     set(vv.height, window.innerHeight - vv.height > 120 || diff > 120 || typing());
   };
-  document.addEventListener('focusin', () => {
+  document.addEventListener('focusin', (e) => {
+    // Safari schiebt beim Fokus die ganze Seite hoch, wenn das Feld unten unter der späteren Tastatur liegt,
+    // und beim Wegklappen wieder zurück. Das war das Flackern (erst weiße Fläche, dann wandert der Chat).
+    // Ist das Feld im Moment des Fokus durchsichtig, verzichtet Safari darauf; die App schrumpft ja ohnehin selbst.
+    const el = e.target as HTMLElement | null;
+    if (typing() && el?.style) {
+      el.style.opacity = '0';
+      setTimeout(() => { el.style.opacity = ''; });
+    }
     if (typing() && kbH && maxH - vv.height < 120) { set(maxH - kbH, true); settle(); } // vorausgleiten
     else fit();
   });
