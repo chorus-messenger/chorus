@@ -21,6 +21,7 @@ const ATT_ICON = { image: '📷', video: '🎬', audio: '🎵', voice: '🎤', f
 export function previewOf(m: Message): string {
   if (m.deleted) return T('Nachricht gelöscht');
   const a = m.attachments[0];
+  if (m.viewOnce && !m.text) return '⏱ ' + T(a?.kind === 'video' ? 'Video (Einmalansicht)' : a?.kind === 'voice' ? 'Sprachnachricht (Einmalansicht)' : a ? 'Foto (Einmalansicht)' : 'Einmalansicht');
   if (m.text) return (a && a.kind !== 'sticker' ? ATT_ICON[a.kind] + ' ' : '') + m.text;
   if (!a) return '';
   if (a.gif || /^image\/gif/i.test(a.mime)) return 'GIF';
@@ -144,6 +145,8 @@ export const MessageBubble = memo(function MessageBubble({ m, album, group, show
           </div>
         )}
         {m.deleted && !kept ? <i>{T('Diese Nachricht wurde gelöscht.')}</i> : <>
+          {m.viewOnce && <div className="vo-tag"><Icon name="timer" size={12} /> {T('Einmalansicht')}</div>}
+          {m.viewOnce && !m.attachments.length && !m.text && <div className="vo-missing">{T('Foto oder Video zur Einmalansicht. WhatsApp schickt es nur ans Handy, dort kannst du es öffnen.')}</div>}
           {mosaic && <Mosaic tiles={tiles} lead={m} />}
           {m.attachments.map((a, i) => mosaic && isTile(a) ? null : <AttachmentView key={i} m={m} a={a} i={i} />)}
           {hasAudio(m) && <Transcript m={m} onTranscribe={onTranscribe} onSummarize={onSummarize} />}
@@ -233,7 +236,7 @@ function isTile(a: Attachment) { const k = effKind(a); return !a.gif && ((k === 
 
 /** Ist die Nachricht ein reines Foto/Video ohne Text, Zitat o. ä.? Dann darf sie sich einem Album anschließen. */
 export function albumable(m: Message, lead = false) {
-  if (m.deleted || m.status === 'failed' || !m.attachments.length || !m.attachments.every(isTile)) return false;
+  if (m.deleted || m.viewOnce || m.status === 'failed' || !m.attachments.length || !m.attachments.every(isTile)) return false;
   return lead || (!m.text && !m.replyToRemoteId && !m.translation && !m.transcript);
 }
 

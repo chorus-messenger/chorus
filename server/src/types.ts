@@ -151,6 +151,9 @@ export interface Message {
   expiresAt?: number | null;
   /** Frühere Fassungen einer bearbeiteten Nachricht (älteste zuerst; ts = wann ersetzt) */
   history?: { text: string; ts: number }[];
+  /** Foto/Video/Sprachnachricht zur Einmalansicht (WhatsApp, Signal, Telegram). Chorus behält es wie ein normales Medium,
+   *  zeigt aber an, dass es so gesendet wurde. Ohne Anhänge: der Messenger hat den Inhalt nicht mitgeschickt (WhatsApp an verknüpfte Geräte). */
+  viewOnce?: boolean;
 }
 
 /** Ereignisse, die Adapter an die Zentrale melden */

@@ -240,6 +240,19 @@ export class WhatsAppAdapter implements Adapter {
     const key = m.key;
     if (!key?.id || !key.remoteJid || key.remoteJid === 'status@broadcast' || key.remoteJid.endsWith('@newsletter')) return;
     const chat = this.chatId(key);
+    // Einmalansicht: WhatsApp schickt solche Fotos/Videos nur ans Handy. Verknüpfte Geräte wie Chorus bekommen
+    // nur einen leeren Platzhalter (<unavailable type="view_once"/>, Baileys setzt key.isViewOnce). Statt ihn zu
+    // verwerfen, als Hinweis im Chat zeigen. Kommt der Inhalt doch mit (z. B. im Verlauf), wird er normal gespeichert.
+    if (!m.message && (key as any).isViewOnce && !m.messageStubType) {
+      const senderJid = key.fromMe ? 'me' : jidNormalizedUser(key.participantAlt?.endsWith('@s.whatsapp.net') ? key.participantAlt : (key.participant || key.remoteJid));
+      this.ev.message({
+        chatRemoteId: chat, remoteId: key.id, senderId: senderJid, fromMe: !!key.fromMe,
+        senderName: key.fromMe ? 'Ich' : this.names.get(senderJid) ?? m.pushName ?? '+' + senderJid.split('@')[0],
+        ts: Number(m.messageTimestamp ?? Date.now() / 1000) * 1000, text: '', replyToRemoteId: null, edited: false, deleted: false,
+        attachments: [], viewOnce: true, status: key.fromMe ? 'sent' : 'received', historic,
+      });
+      return;
+    }
     const content = normalizeMessageContent(m.message);
     if (!content) return;
     this.keys.set(key.id, key);
@@ -290,7 +303,7 @@ export class WhatsAppAdapter implements Adapter {
       chatRemoteId: chat, remoteId: key.id, senderId: senderJid, senderName, fromMe: !!key.fromMe, ts, text,
       replyToRemoteId: ctx?.stanzaId ?? null, edited: false, deleted: false, attachments: atts,
       status: key.fromMe ? (m.status != null && m.status >= 4 ? 'read' : m.status === 3 ? 'delivered' : 'sent') : 'received',
-      historic,
+      historic, ...(isViewOnce(m.message, content) ? { viewOnce: true } : {}),
     });
   }
 
@@ -443,3 +456,10 @@ export class WhatsAppAdapter implements Adapter {
 }
 
 export const whatsappFactory: AdapterFactory = ({ config, session, events }) => new WhatsAppAdapter(config as any, session, events);
+
+/** Einmalansicht erkennen: Hülle viewOnceMessage(V2/V2Extension), auch in verschwindenden Nachrichten, oder Flag am Medium */
+function isViewOnce(raw: proto.IMessage | null | undefined, content: proto.IMessage): boolean {
+  const outer = raw?.ephemeralMessage?.message ?? raw;
+  if (outer?.viewOnceMessage || outer?.viewOnceMessageV2 || outer?.viewOnceMessageV2Extension) return true;
+  return !!(content.imageMessage?.viewOnce || content.videoMessage?.viewOnce || content.audioMessage?.viewOnce);
+}

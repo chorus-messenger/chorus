@@ -62,6 +62,8 @@ export interface Message {
   pinnedAt?: number; starred?: boolean;
   /** Selbstzerstörende Notiz: verschwindet zu diesem Zeitpunkt */
   expiresAt?: number | null;
+  /** Wurde als Foto/Video zur Einmalansicht gesendet (Chorus behält es). Ohne Anhänge: Inhalt nur auf dem Handy */
+  viewOnce?: boolean;
 }
 export interface LinkPreview { url: string; title: string | null; description: string | null; image: string | null; site: string | null; author?: string | null; video?: boolean }
 export interface PublicProfile {

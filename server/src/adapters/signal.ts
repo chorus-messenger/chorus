@@ -368,6 +368,8 @@ export class SignalAdapter implements Adapter {
       deleted: false,
       attachments,
       status: fromMe ? 'sent' : 'received',
+      // Einmalansicht: signal-cli liefert die Anhänge mit, Chorus behält sie und markiert nur
+      ...(d.viewOnce ? { viewOnce: true } : {}),
     });
   }
 

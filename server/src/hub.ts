@@ -136,7 +136,7 @@ export class Hub {
             else if (age < 6 * 3600_000) console.log(`[push] keine Benachrichtigung: Nachricht kam ${Math.round(age / 60_000)} Min. zu spät (${chat.id})`);
           }
           if (Date.now() - msg.ts < 5 * 60_000) this.fire(msg.fromMe ? this.own : this.incoming, chat, msg);
-          if (msg.attachments.some((a) => !a.fileId)) this.queueMedia(msg.id);
+          if (msg.attachments.some((a) => !a.fileId)) this.queueMedia(msg.id, !!msg.viewOnce);
           this.draftSent(cid, msg);
         }
         this.emit({ type: 'message', message: msg });
@@ -438,8 +438,9 @@ export class Hub {
   /** Vom Gegenüber gelöschte Nachrichten sichtbar behalten */
   get keepDeleted(): boolean { return this.store.getSetting('keepDeleted', true); }
   set keepDeleted(on: boolean) { this.store.setSetting('keepDeleted', on); }
-  private queueMedia(messageId: string) {
-    if (!this.autoSaveMedia) return;
+  /** force: Einmalansicht immer sofort sichern (auch ohne Autospeichern), solange der Messenger es noch herausgibt */
+  private queueMedia(messageId: string, force = false) {
+    if (!this.autoSaveMedia && !force) return;
     this.mediaQueue.push(messageId);
     if (!this.mediaBusy) this.drainMedia();
   }
@@ -451,7 +452,7 @@ export class Hub {
       if (!msg) continue;
       for (let i = 0; i < msg.attachments.length; i++) {
         const a = msg.attachments[i];
-        if (a.fileId || (a.size && a.size > MAX_AUTO_MEDIA)) continue;
+        if (a.fileId || (a.size && a.size > MAX_AUTO_MEDIA && !msg.viewOnce)) continue;
         const data = await this.attachmentData(this.store.getMessage(id) ?? msg, i).catch(() => null);
         if (data) await this.prepareThumb(id, i, data).catch(() => {});
       }
@@ -707,7 +708,8 @@ export function uiLang(store: { getSetting<T>(k: string, f: T): T }): 'en' | 'de
   return store.getSetting<{ lang?: string }>('ai', {}).lang === 'de' ? 'de' : 'en';
 }
 const PREVIEW_EN: Record<string, string> = {
-  'Nachricht gelöscht': 'Message deleted', '📷 Foto': '📷 Photo', '🎤 Sprachnachricht': '🎤 Voice message', 'Neue Nachricht': 'New message', 'Erinnerung': 'Reminder',
+  'Nachricht gelöscht': 'Message deleted', '📷 Foto': '📷 Photo', '⏱ Einmalansicht': '⏱ View once',
+  '⏱ Foto (Einmalansicht)': '⏱ Photo (view once)', '⏱ Video (Einmalansicht)': '⏱ Video (view once)', '⏱ Sprachnachricht (Einmalansicht)': '⏱ Voice message (view once)', '🎤 Sprachnachricht': '🎤 Voice message', 'Neue Nachricht': 'New message', 'Erinnerung': 'Reminder',
 };
 /** Kurztexte des Servers für Benachrichtigungen in die Sprache des Profils bringen */
 export function localize(text: string, lang: 'en' | 'de'): string { return lang === 'en' ? PREVIEW_EN[text] ?? text : text; }
@@ -717,6 +719,7 @@ const ATT_ICON = { image: '📷', video: '🎬', audio: '🎵', voice: '🎤', f
 export function previewText(m: Message): string {
   if (m.deleted) return 'Nachricht gelöscht';
   const a = m.attachments[0];
+  if (m.viewOnce && !m.text) return a ? ({ image: '⏱ Foto (Einmalansicht)', video: '⏱ Video (Einmalansicht)', voice: '⏱ Sprachnachricht (Einmalansicht)' } as Record<string, string>)[a.kind] ?? '⏱ Einmalansicht' : '⏱ Einmalansicht';
   // Text mit Anhang (z. B. Video mit Bildunterschrift): Symbol davor, damit man den Anhang in Liste und Push sieht
   if (m.text) return (a && a.kind !== 'sticker' ? ATT_ICON[a.kind] + ' ' : '') + m.text.slice(0, 200);
   if (!a) return '';
