@@ -11,19 +11,29 @@ export interface OrganizeSettings {
   bring: { email: string; pass: string; list: string; listName: string };
   /** Adressbuch: leer = aus, „all“ = alle, sonst Pfad */
   contacts: string; contactsName: string; contactsAt: number;
-  /** Zusätzlicher CalDAV-Server (iCloud oder anderer); home = gefundene Kalender-Sammlung (volle URL) */
-  caldav: { kind: 'icloud' | 'other'; url: string; user: string; pass: string; home: string; cardHome?: string };
+  /** iCloud (Apple-ID + app-spezifisches Passwort) und eigener CalDAV/CardDAV-Server; home/cardHome = gefundene Sammlungen (volle URL) */
+  icloud: DavAccount & { mail?: string };
+  caldav: DavAccount;
 }
-const DEFAULTS: OrganizeSettings = { contacts: '', contactsName: '', contactsAt: 0, caldav: { kind: 'icloud', url: '', user: '', pass: '', home: '' }, calendar: '', calendarName: '', tasks: '', tasksName: '', bring: { email: '', pass: '', list: '', listName: '' } };
+export interface DavAccount { url: string; user: string; pass: string; home: string; cardHome?: string }
+export type Slot = 'icloud' | 'caldav';
+const NO_DAV: DavAccount = { url: '', user: '', pass: '', home: '' };
+const DEFAULTS: OrganizeSettings = { contacts: '', contactsName: '', contactsAt: 0, icloud: { ...NO_DAV }, caldav: { ...NO_DAV }, calendar: '', calendarName: '', tasks: '', tasksName: '', bring: { email: '', pass: '', list: '', listName: '' } };
 export interface OrganizePublic {
   nextcloud: boolean; calendar: string; calendarName: string; tasks: string; tasksName: string;
   contacts: string; contactsName: string; contactsAt: number; contactsCount: number;
-  caldav: { kind: 'icloud' | 'other'; url: string; user: string; hasPass: boolean; enabled: boolean; contacts: boolean };
+  icloud: DavPublic & { mail: string | null };
+  caldav: DavPublic;
   bring: { email: string; hasPass: boolean; list: string; listName: string; enabled: boolean };
 }
+export interface DavPublic { url: string; user: string; hasPass: boolean; enabled: boolean; contacts: boolean }
 export interface CalEvent { title: string; start: string; end: string; allDay: boolean; location: string; note?: string }
 export interface Task { title: string; due: string; note?: string }
 
+const ICLOUD_CAL = 'https://caldav.icloud.com', ICLOUD_CARD = 'https://contacts.icloud.com';
+const basic = (u: string, p: string) => 'Basic ' + Buffer.from(`${u}:${p}`).toString('base64');
+const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
+const davPublic = (a: DavAccount): DavPublic => ({ url: a.url, user: a.user, hasPass: !!a.pass, enabled: !!(a.home && a.pass), contacts: !!(a.cardHome && a.pass) });
 const TZ = () => process.env.TZ || 'Europe/Berlin';
 const BRING = 'https://api.getbring.com/rest/';
 // Öffentlich bekannter Schlüssel der Bring!-Web-/Android-App (die API ist inoffiziell)
@@ -35,14 +45,19 @@ export class Organize {
 
   get settings(): OrganizeSettings {
     const s = this.store.getSetting<Partial<OrganizeSettings>>('organize', {});
-    return { ...DEFAULTS, ...s, bring: { ...DEFAULTS.bring, ...s.bring }, caldav: { ...DEFAULTS.caldav, ...s.caldav } };
+    const out: OrganizeSettings = { ...DEFAULTS, ...s, bring: { ...DEFAULTS.bring, ...s.bring }, icloud: { ...NO_DAV, ...s.icloud }, caldav: { ...NO_DAV, ...s.caldav } };
+    // Früher lagen iCloud und eigener Server in einem Feld (kind)
+    const old = out.caldav as DavAccount & { kind?: string };
+    if (old.kind) { if (old.kind === 'icloud' && !out.icloud.pass) out.icloud = { url: ICLOUD_CAL, user: old.user, pass: old.pass, home: old.home, cardHome: old.cardHome }; out.caldav = old.kind === 'icloud' ? { ...NO_DAV } : { url: old.url, user: old.user, pass: old.pass, home: old.home, cardHome: old.cardHome }; }
+    return out;
   }
   publicSettings(): OrganizePublic {
     const s = this.settings, b = s.bring;
     return {
       nextcloud: this.storage().publicSettings().nextcloud.enabled,
       calendar: s.calendar, calendarName: s.calendarName, tasks: s.tasks, tasksName: s.tasksName,
-      caldav: { kind: s.caldav.kind, url: s.caldav.url, user: s.caldav.user, hasPass: !!s.caldav.pass, enabled: !!(s.caldav.home && s.caldav.pass), contacts: !!(s.caldav.cardHome && s.caldav.pass) },
+      icloud: { ...davPublic(s.icloud), mail: this.icloudMail() },
+      caldav: davPublic(s.caldav),
       contacts: s.contacts, contactsName: s.contactsName, contactsAt: s.contactsAt, contactsCount: s.contacts ? this.store.contactCount() : 0,
       bring: { email: b.email, hasPass: !!b.pass, list: b.list, listName: b.listName, enabled: !!(b.email && b.pass && b.list) },
     };
@@ -71,42 +86,52 @@ export class Organize {
     return this.publicSettings();
   }
 
-  // ---------- Nextcloud CalDAV ----------
-  /** CalDAV-Zugang speichern und die Kalender suchen; null = trennen */
-  async setCaldav(p: { kind?: unknown; url?: unknown; user?: unknown; pass?: unknown } | null): Promise<OrganizePublic> {
+  /** Verknüpftes iCloud-Postfach (Messenger E-Mail); ein schon vorhandenes iCloud-Postfach zählt automatisch dazu */
+  icloudMail(): string | null {
+    const id = this.settings.icloud.mail;
+    if (id && this.store.getAccountRow(id)) return id;
+    const row = this.store.listAccountRows().find((r) => r.network === 'email' && /(^|\.)mail\.me\.com$/i.test(String(JSON.parse(r.config)?.imapHost ?? '')));
+    return row?.id ?? null;
+  }
+  // ---------- iCloud und eigener Server (CalDAV/CardDAV) ----------
+  /** Zugang speichern und Kalender/Adressbücher suchen; null = trennen (Ziele dieser Quelle werden geleert) */
+  async setDav(slot: Slot, p: { url?: unknown; user?: unknown; pass?: unknown } | null): Promise<OrganizePublic> {
     const cur = this.settings;
     if (!p) {
-      const drop = (h: string) => /^https?:\/\//.test(h);
-      cur.caldav = { ...DEFAULTS.caldav };
-      if (drop(cur.calendar)) { cur.calendar = ''; cur.calendarName = ''; }
-      if (drop(cur.tasks)) { cur.tasks = ''; cur.tasksName = ''; }
-      if (drop(cur.contacts)) { cur.contacts = ''; cur.contactsName = ''; this.contactsApi().clear(); }
+      const home = [cur[slot].home, cur[slot].cardHome].filter(Boolean) as string[];
+      const mine = (h: string) => home.some((x) => h.startsWith(x));
+      cur[slot] = slot === 'icloud' ? { ...NO_DAV, mail: cur.icloud.mail } : { ...NO_DAV };
+      if (mine(cur.calendar)) { cur.calendar = ''; cur.calendarName = ''; }
+      if (mine(cur.tasks)) { cur.tasks = ''; cur.tasksName = ''; }
+      if (mine(cur.contacts)) { cur.contacts = ''; cur.contactsName = ''; this.store.setSetting('organize', cur); this.contactsApi().clear(); }
       this.store.setSetting('organize', cur);
       return this.publicSettings();
     }
-    const kind = p.kind === 'other' ? 'other' : 'icloud';
-    const url = kind === 'icloud' ? 'https://caldav.icloud.com' : baseUrl(String(p.url ?? ''));
-    const user = String(p.user ?? '').trim();
-    const pass = p.pass ? String(p.pass).trim().replace(kind === 'icloud' ? /\s+/g : /^$/, '') : cur.caldav.pass;
+    const icloud = slot === 'icloud';
+    const url = icloud ? ICLOUD_CAL : baseUrl(String(p.url ?? ''));
+    const user = String(p.user ?? '').trim() || cur[slot].user;
+    const pass = p.pass ? String(p.pass).trim().replace(icloud ? /\s+/g : /^$/, '') : cur[slot].pass;
     if (!/^https:\/\/[^/\s]+/.test(url) || !user || !pass) throw new StorageError(400, 'Adresse, Benutzer und Passwort fehlen');
-    const auth = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
+    const auth = basic(user, pass);
     const home = await discoverHome(url, auth);
     // Kontakte über dieselbe Anmeldung (iCloud: eigener Server); ohne Adressbücher geht es trotzdem weiter
-    const cardHome = await discoverHome(kind === 'icloud' ? 'https://contacts.icloud.com' : url, auth, 'card').catch(() => '');
-    cur.caldav = { kind, url, user, pass, home, cardHome };
+    const cardHome = await discoverHome(icloud ? ICLOUD_CARD : url, auth, 'card').catch(() => '');
+    cur[slot] = { ...cur[slot], url, user, pass, home, cardHome };
     this.store.setSetting('organize', cur);
     return this.publicSettings();
   }
-  private dav() {
-    const c = this.settings.caldav;
-    if (!c.home || !c.pass) throw new StorageError(400, 'Kein Kalender-Server verbunden (Einstellungen → Verbindungen).');
-    return { home: c.home, origin: new URL(c.home).origin, auth: 'Basic ' + Buffer.from(`${c.user}:${c.pass}`).toString('base64'), label: c.kind === 'icloud' ? 'iCloud' : new URL(c.home).host };
+  /** Verbundene CalDAV-Quellen außer Nextcloud */
+  private davSources() {
+    const s = this.settings;
+    return (['icloud', 'caldav'] as Slot[]).filter((k) => s[k].home && s[k].pass).map((k) => {
+      const a = s[k];
+      return { slot: k, label: k === 'icloud' ? 'iCloud' : hostOf(a.home), auth: basic(a.user, a.pass), home: a.home, cardHome: a.cardHome, url: a.url };
+    });
   }
-  /** Ziel: Nextcloud-Pfad oder volle URL unterhalb der gefundenen CalDAV-Sammlung */
+  /** Ziel: Nextcloud-Pfad oder volle URL unterhalb einer gefundenen CalDAV-Sammlung */
   private okTarget(h: string) {
     if (!/^https?:\/\//.test(h)) return okHref(h);
-    const home = this.settings.caldav.home;
-    return !!home && h.startsWith(home) && h.length > home.length && !h.includes('..') && !/[?#]/.test(h);
+    return !h.includes('..') && !/[?#]/.test(h) && this.davSources().some((d) => h.startsWith(d.home) && h.length > d.home.length);
   }
   /** Adressbuch-Quellen: Nextcloud (Pfade) und der CalDAV-Zugang (volle URLs), je nachdem was verbunden ist */
   private contactsApi() {
@@ -115,16 +140,17 @@ export class Organize {
       const n = this.nc();
       src.push({ label: 'Nextcloud', auth: n.auth, home: `${n.base}/remote.php/dav/addressbooks/users/${encodeURIComponent(n.user)}/`, full: false });
     }
-    const c = this.settings.caldav;
-    if (c.cardHome && c.pass) src.push({ label: c.kind === 'icloud' ? 'iCloud' : new URL(c.cardHome).host, auth: 'Basic ' + Buffer.from(`${c.user}:${c.pass}`).toString('base64'), home: c.cardHome, full: true });
+    for (const d of this.davSources()) if (d.cardHome) src.push({ label: d.label, auth: d.auth, home: d.cardHome, full: true });
     return new Contacts(this.store, src);
   }
   /** Ältere Verbindungen ohne Adressbuch-Suche: einmal nachholen (cardHome undefined = noch nie gesucht) */
   private async ensureCardHome() {
-    const cur = this.settings, c = cur.caldav;
-    if (!c.home || !c.pass || c.cardHome !== undefined) return;
-    const auth = 'Basic ' + Buffer.from(`${c.user}:${c.pass}`).toString('base64');
-    c.cardHome = await discoverHome(c.kind === 'icloud' ? 'https://contacts.icloud.com' : c.url, auth, 'card').catch(() => '');
+    const cur = this.settings;
+    for (const k of ['icloud', 'caldav'] as Slot[]) {
+      const c = cur[k];
+      if (!c.home || !c.pass || c.cardHome !== undefined) continue;
+      c.cardHome = await discoverHome(k === 'icloud' ? ICLOUD_CARD : c.url, basic(c.user, c.pass), 'card').catch(() => '');
+    }
     this.store.setSetting('organize', cur);
   }
   async addressBooks() { await this.ensureCardHome(); return this.contactsApi().books(); }
@@ -143,25 +169,24 @@ export class Organize {
     const n = st.settings.nextcloud;
     return { origin: new URL(n.url).origin, base: n.url, user: n.user, auth: 'Basic ' + Buffer.from(`${n.user}:${n.pass}`).toString('base64') };
   }
-  /** Kalender aus Nextcloud und dem CalDAV-Server zusammen; Fehler einer Quelle blenden nur diese aus */
+  /** Kalender aus Nextcloud, iCloud und eigenem Server zusammen; Fehler einer Quelle blenden nur diese aus */
   async calendars(): Promise<{ href: string; name: string; events: boolean; tasks: boolean; source: string }[]> {
-    const nc = this.storage().publicSettings().nextcloud.enabled, dav = this.publicSettings().caldav.enabled;
-    if (!nc && !dav) throw new StorageError(400, 'Kein Kalender verbunden (Einstellungen → Verbindungen).');
-    const [a, b] = await Promise.allSettled([nc ? this.ncCalendars() : Promise.resolve([]), dav ? this.davCalendars() : Promise.resolve([])]);
-    if (a.status === 'rejected' && b.status === 'rejected') throw a.reason;
-    return [
-      ...(a.status === 'fulfilled' ? a.value.map((c) => ({ ...c, source: 'Nextcloud' })) : []),
-      ...(b.status === 'fulfilled' ? b.value : []),
-    ];
-  }
-  private async davCalendars() {
-    const d = this.dav();
-    const r = await call(d.home, { method: 'PROPFIND', headers: { Authorization: d.auth, Depth: '1', 'Content-Type': 'application/xml' }, body: CAL_PROPS }, d.label);
-    if (r.status === 401) throw new StorageError(400, `${d.label} lehnt Benutzer oder Passwort ab`);
-    if (r.status !== 207) throw new StorageError(422, `${d.label} antwortet mit ${r.status}`);
-    const homePath = new URL(d.home).pathname;
-    return parseCalendars(await r.text(), (h) => h.startsWith(homePath) && h.length > homePath.length && !h.includes('..'))
-      .map((c) => ({ ...c, href: d.origin + c.href, source: d.label }));
+    const nc = this.storage().publicSettings().nextcloud.enabled, davs = this.davSources();
+    if (!nc && !davs.length) throw new StorageError(400, 'Kein Kalender verbunden (Einstellungen → Verbindungen).');
+    const res = await Promise.allSettled([
+      nc ? this.ncCalendars().then((l) => l.map((c) => ({ ...c, source: 'Nextcloud' }))) : Promise.resolve([]),
+      ...davs.map(async (d) => {
+        const r = await call(d.home, { method: 'PROPFIND', headers: { Authorization: d.auth, Depth: '1', 'Content-Type': 'application/xml' }, body: CAL_PROPS }, d.label);
+        if (r.status === 401) throw new StorageError(400, `${d.label} lehnt Benutzer oder Passwort ab`);
+        if (r.status !== 207) throw new StorageError(422, `${d.label} antwortet mit ${r.status}`);
+        const homePath = new URL(d.home).pathname, origin = new URL(d.home).origin;
+        return parseCalendars(await r.text(), (h) => h.startsWith(homePath) && h.length > homePath.length && !h.includes('..'))
+          .map((c) => ({ ...c, href: origin + c.href, source: d.label }));
+      }),
+    ]);
+    const ok = res.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+    if (!ok.length && res.some((r) => r.status === 'rejected')) throw (res.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason;
+    return ok;
   }
   private async ncCalendars() {
     const n = this.nc();
@@ -176,7 +201,9 @@ export class Organize {
   private async put(href: string, uid: string, ics: string, who: string) {
     if (!href || !this.okTarget(href)) throw new StorageError(400, `Bitte zuerst in den Einstellungen einen ${who} wählen.`);
     const full = /^https?:\/\//.test(href);
-    const t = full ? (() => { const d = this.dav(); return { url: href, auth: d.auth, label: d.label }; })() : (() => { const n = this.nc(); return { url: n.origin + href, auth: n.auth, label: 'Nextcloud' }; })();
+    const d = full ? this.davSources().find((x) => href.startsWith(x.home)) : null;
+    if (full && !d) throw new StorageError(400, `Bitte zuerst in den Einstellungen einen ${who} wählen.`);
+    const t = d ? { url: href, auth: d.auth, label: d.label } : (() => { const n = this.nc(); return { url: n.origin + href, auth: n.auth, label: 'Nextcloud' }; })();
     const r = await call(`${t.url.endsWith('/') ? t.url : t.url + '/'}${uid}.ics`, {
       method: 'PUT', headers: { Authorization: t.auth, 'Content-Type': 'text/calendar; charset=utf-8', 'If-None-Match': '*' }, body: ics,
     }, t.label);

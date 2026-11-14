@@ -900,7 +900,43 @@ const O = (req: FastifyRequest) => new Organize(H(req).store);
 app.get('/api/organize', async (req) => O(req).publicSettings());
 app.put('/api/organize', async (req) => O(req).update((req.body ?? {}) as any));
 app.get('/api/organize/calendars', async (req) => O(req).calendars());
-app.put('/api/organize/caldav', async (req) => O(req).setCaldav((req.body as any)?.off ? null : (req.body ?? {}) as any));
+const slotOf = (v: unknown) => { if (v === 'icloud' || v === 'caldav') return v; throw new StorageError(404, 'Nicht gefunden'); };
+app.put('/api/organize/dav/:slot', async (req) => {
+  const slot = slotOf((req.params as any).slot), o = O(req), body = (req.body ?? {}) as any;
+  const pub = await o.setDav(slot, body.off ? null : body);
+  // iCloud: neues Passwort auch für das verknüpfte Postfach (eine Anmeldung für alles)
+  if (slot === 'icloud' && !body.off && body.pass && pub.icloud.mail) {
+    const h = H(req), row = h.store.getAccountRow(pub.icloud.mail);
+    if (row) { h.store.setAccountConfig(row.id, { ...JSON.parse(row.config), password: o.settings.icloud.pass }); await h.startAccount(row.id); }
+  }
+  return pub;
+});
+/** iCloud-Mail an: vorhandenes iCloud-Postfach übernehmen oder mit den iCloud-Zugangsdaten anlegen; aus: Postfach entfernen */
+app.put('/api/organize/icloud/mail', async (req) => {
+  const h = H(req), o = O(req), body = (req.body ?? {}) as { on?: boolean; address?: string };
+  const cur = o.settings;
+  if (!body.on) {
+    const linked = o.icloudMail();
+    if (linked) await h.removeAccount(linked);
+    h.store.setSetting('organize', { ...cur, icloud: { ...cur.icloud, mail: undefined } });
+    return o.publicSettings();
+  }
+  if (!cur.icloud.pass) throw new StorageError(400, 'Zuerst iCloud verbinden.');
+  const isIcloud = (c: any) => /(^|\.)mail\.me\.com$/i.test(String(c?.imapHost ?? ''));
+  const existing = h.store.listAccountRows().find((r: any) => r.network === 'email' && isIcloud(JSON.parse(r.config)));
+  let id: string;
+  if (existing) {
+    h.store.setAccountConfig(existing.id, { ...JSON.parse(existing.config), password: cur.icloud.pass });
+    await h.startAccount(existing.id);
+    id = existing.id;
+  } else {
+    const address = String(body.address ?? '').trim().toLowerCase() || (/@(icloud|me|mac)\.com$/i.test(cur.icloud.user) ? cur.icloud.user.toLowerCase() : '');
+    if (!/^[^\s@]+@(icloud|me|mac)\.com$/i.test(address)) throw new StorageError(400, 'Bitte deine iCloud-Mail-Adresse angeben (…@icloud.com).');
+    id = (await h.addAccount('email', 'iCloud', { address, password: cur.icloud.pass, imapHost: 'imap.mail.me.com', imapPort: 993, smtpHost: 'smtp.mail.me.com', smtpPort: 587, hideBulk: true })).id;
+  }
+  h.store.setSetting('organize', { ...o.settings, icloud: { ...o.settings.icloud, mail: id } });
+  return o.publicSettings();
+});
 app.get('/api/organize/addressbooks', async (req) => O(req).addressBooks());
 app.post('/api/organize/contacts/sync', async (req) => ({ message: await O(req).syncContacts(), settings: O(req).publicSettings() }));
 app.get('/api/organize/bring/lists', async (req) => O(req).bringLists());

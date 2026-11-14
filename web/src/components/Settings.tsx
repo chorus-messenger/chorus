@@ -113,7 +113,7 @@ export function Settings({ server, accounts, onClose, onAdd, onLocked, onProfile
   const bubbleMode = loadAccent().name;
   const acc = shown?.startsWith('acc:') ? accounts.find((a) => a.id === shown.slice(4)) : undefined;
   const conn = shown?.startsWith('conn:') ? shown.slice(5) as ConnKind : undefined;
-  const title = acc ? acc.label : conn ? CONN_TITLES[conn] : shown ? TITLES[shown as keyof typeof TITLES] : '';
+  const title = acc ? acc.label : conn ? T(CONN_TITLES[conn]) : shown ? TITLES[shown as keyof typeof TITLES] : '';
 
   const renderPage = () => {
     if (!shown) return null;
