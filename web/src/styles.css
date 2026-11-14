@@ -1342,3 +1342,10 @@ html .chat-view.own-bg { background: var(--chat-bg-own); }
 .lp-play { position: absolute; left: 50%; top: 50%; width: 44px; height: 32px; margin: -16px 0 0 -22px; border-radius: 9px; background: rgba(0,0,0,.6); color: #fff; display: grid; place-items: center; }
 .lp.yt .lp-body { padding: 7px 10px 8px; gap: 2px; }
 .lp-title.two { white-space: normal; height: 2.5em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* „Neue Nachricht“-Knopf (Handy): glasig in der Akzentfarbe, Form folgt dem Blasen-Stil (Darstellung) */
+.fab { background: color-mix(in srgb, var(--accent) 72%, transparent); -webkit-backdrop-filter: saturate(1.8) blur(16px); backdrop-filter: saturate(1.8) blur(16px);
+  border: 1px solid color-mix(in srgb, #fff 22%, transparent); border-radius: 50%; }
+html.shape-square .fab { border-radius: 8px; }
+html.shape-compact .fab { width: 50px; height: 50px; border-radius: 15px; }
+
