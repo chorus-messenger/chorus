@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { Network } from '../api';
 import { NETWORKS } from '../util';
 import { sendAnimEnabled, setSendAnim } from '../sendAnim';
+import { linkPreviewsOn, setLinkPreviews } from '../linkPreview';
 import { FX, fxOn, setFx } from '../effects';
 import {
   ACCENTS, BUBBLE_DEFAULTS, BUBBLE_PALETTE, bubbleHex, loadAccent, saveAccent, CHAT_BACKGROUNDS, chatBgCss, customBgImage, ink, loadBubbles, loadChatBg, saveBubbles, saveChatBg, setCustomBg,
@@ -53,6 +54,7 @@ export function BubbleSection({ nets }: { nets: Network[] }) {
   const [anim, setAnim] = useState(sendAnimEnabled);
   const [shape, setShape] = useState(loadShape);
   const [hap, setHap] = useState(hapticsOn);
+  const [lp, setLp] = useState(linkPreviewsOn);
   const list: Network[] = nets.length ? nets : ['signal', 'whatsapp', 'telegram'];
   const pickBg = (id: string) => { setBg(id); saveChatBg(id); };
   const previewNet = list[0];
@@ -124,6 +126,17 @@ export function BubbleSection({ nets }: { nets: Network[] }) {
       {err && <small style={{ color: "var(--danger)" }}>{err}</small>}
       <small className="muted">{T('Der Hintergrund gilt für dieses Gerät.')}</small>
     </div>
+
+    <p className="ios-caption">{T('Links')}</p>
+    <div className="ios-card">
+      <label className="ios-row toggle-row">
+        <span className="ios-row-main">
+          <span className="ios-row-text"><span className="ios-title">{T('Link-Vorschau')}</span><small>{T('Titel und Bild unter Links in Nachrichten, YouTube mit Vorschaubild')}</small></span>
+          <input type="checkbox" className="switch" checked={lp} onChange={(e) => { setLp(e.target.checked); setLinkPreviews(e.target.checked); }} />
+        </span>
+      </label>
+    </div>
+    <p className="ios-foot">{T('Die Vorschau lädt dein Chorus-Server, nicht dein Gerät.')}</p>
 
     <p className="ios-caption">{T('Bewegung')}</p>
     <div className="ios-card">

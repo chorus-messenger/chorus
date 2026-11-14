@@ -2,11 +2,11 @@ import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
 /**
- * Link-Vorschau (Titel, Beschreibung, Bild) für die Links-Ansicht der Galerie.
+ * Link-Vorschau (Titel, Beschreibung, Bild) für Chat-Blasen und die Links-Ansicht der Galerie.
  * Der Server holt die Seite selbst, damit der Browser nicht jede Seite beim bloßen Ansehen der Liste kontaktiert.
  * Nur öffentliche Adressen (kein LAN, kein localhost), wenige Weiterleitungen, kleine Antworten, Zwischenspeicher im Speicher.
  */
-export interface LinkPreview { url: string; title: string | null; description: string | null; image: string | null; site: string | null }
+export interface LinkPreview { url: string; title: string | null; description: string | null; image: string | null; site: string | null; author?: string | null; video?: boolean }
 
 const cache = new Map<string, { at: number; p: LinkPreview | null }>();
 const imgCache = new Map<string, { at: number; mime: string; data: Buffer }>();
@@ -77,11 +77,35 @@ export function parseMeta(html: string, base: string): Omit<LinkPreview, 'url'> 
   return { title: clean(title, 200), description: clean(desc, 300), image, site: clean(meta.get('og:site_name'), 80) };
 }
 
+/** YouTube-Video-ID aus watch-, youtu.be-, shorts-, live- und embed-Links */
+export function youtubeId(raw: string): string | null {
+  let u: URL; try { u = new URL(raw); } catch { return null; }
+  const h = u.hostname.toLowerCase().replace(/^(www|m|music)\./, '');
+  let id: string | null = null;
+  if (h === 'youtu.be') id = u.pathname.slice(1).split('/')[0];
+  else if (h === 'youtube.com' || h === 'youtube-nocookie.com') {
+    id = u.pathname === '/watch' ? u.searchParams.get('v') : u.pathname.match(/^\/(?:shorts|live|embed|v)\/([^/?#]+)/)?.[1] ?? null;
+  }
+  return id && /^[\w-]{6,20}$/.test(id) ? id : null;
+}
+
+/** YouTube liefert ohne Cookie-Zustimmung kein brauchbares HTML, oEmbed dagegen Titel und Kanal */
+async function youtubePreview(raw: string, id: string): Promise<LinkPreview> {
+  const base: LinkPreview = { url: raw, title: null, description: null, image: `https://i.ytimg.com/vi/${id}/mqdefault.jpg`, site: 'YouTube', author: null, video: true };
+  try {
+    const r = await safeFetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(`https://www.youtube.com/watch?v=${id}`)}`, 'application/json', 100_000);
+    const j = JSON.parse(r.data.toString('utf8')) as { title?: string; author_name?: string };
+    return { ...base, title: clean(j.title, 200), author: clean(j.author_name, 100) };
+  } catch { return base; }
+}
+
 export async function linkPreview(raw: string): Promise<LinkPreview | null> {
   const hit = cache.get(raw);
   if (hit && Date.now() - hit.at < TTL) return hit.p;
   let p: LinkPreview | null = null;
-  try {
+  const yt = youtubeId(raw);
+  if (yt) p = await youtubePreview(raw, yt);
+  else try {
     const r = await safeFetch(raw, 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', 400_000);
     if (r.mime.startsWith('image/')) p = { url: r.url, title: null, description: null, image: r.url, site: null };
     else if (!r.mime || r.mime.includes('html')) p = { url: r.url, ...parseMeta(r.data.toString('utf8'), r.url) };
