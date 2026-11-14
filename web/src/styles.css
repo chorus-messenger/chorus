@@ -1306,3 +1306,20 @@ html .chat-view.own-bg { background: var(--chat-bg-own); }
 .mi-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mi-label small { margin-left: 6px; color: var(--ink-2); }
 .mi-time { color: var(--ink-2); font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Link-Vorschau in der Blase: feste Höhe ab dem ersten Rendern (kein Sprung beim Nachladen) */
+.bubble .lp { display: flex; gap: 10px; align-items: center; width: 270px; max-width: 100%; height: 64px; margin: 6px 0 2px; padding: 4px; box-sizing: border-box;
+  border-radius: 12px; background: color-mix(in srgb, currentColor 7%, transparent); color: inherit; text-decoration: none; overflow: hidden; -webkit-tap-highlight-color: transparent; }
+.bubble .lp:active { background: color-mix(in srgb, currentColor 13%, transparent); }
+.lp-thumb { flex: none; width: 56px; height: 56px; border-radius: 9px; overflow: hidden; display: grid; place-items: center; background: color-mix(in srgb, currentColor 8%, transparent); opacity: .9; }
+.lp img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; transition: opacity .2s; }
+.lp img.on { opacity: 1; }
+.lp-body { flex: 1; min-width: 0; display: grid; line-height: 1.25; }
+.lp-title { font-size: 14px; font-weight: 600; min-height: 1.25em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp-desc { font-size: 12.5px; min-height: 1.25em; opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp-site { font-size: 11.5px; opacity: .6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bubble .lp.yt { display: block; height: auto; padding: 0; }
+.lp.yt .lp-img { position: relative; display: block; aspect-ratio: 16 / 9; background: #000; }
+.lp-play { position: absolute; left: 50%; top: 50%; width: 44px; height: 32px; margin: -16px 0 0 -22px; border-radius: 9px; background: rgba(0,0,0,.6); color: #fff; display: grid; place-items: center; }
+.lp.yt .lp-body { padding: 7px 10px 8px; gap: 2px; }
+.lp-title.two { white-space: normal; height: 2.5em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }

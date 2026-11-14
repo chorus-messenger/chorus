@@ -12,6 +12,8 @@ import { Avatar } from './Rail';
 import { player, usePlayer } from '../player';
 import { T, lang, locale } from '../i18n';
 import { BigEmoji } from './AnimEmoji';
+import { cachedPreview, linkPreviewsOn, loadPreview, youtubeId } from '../linkPreview';
+import type { LinkPreview } from '../api';
 import { hintOf } from '../detect';
 
 const ATT_ICON = { image: '📷', video: '🎬', audio: '🎵', voice: '🎤', file: '📎', sticker: '' } as const;
@@ -146,6 +148,7 @@ export const MessageBubble = memo(function MessageBubble({ m, album, group, show
           {m.attachments.map((a, i) => mosaic && isTile(a) ? null : <AttachmentView key={i} m={m} a={a} i={i} />)}
           {hasAudio(m) && <Transcript m={m} onTranscribe={onTranscribe} onSummarize={onSummarize} />}
           {m.text && (big ? <BigEmoji text={m.text} /> : <div className="text">{linkify(m.text)}</div>)}
+          {m.text && !big && !m.attachments.length && !m.html && <LinkCard text={m.text} />}
           {onDetect && <DetectHint m={m} onDetect={onDetect} />}
           {m.html && <button className="mail-orig" onClick={() => openMail(m)}><Icon name="file" size={14} />{T('Original-E-Mail ansehen')}</button>}
           {m.translation && (() => {
@@ -353,6 +356,49 @@ function VoicePlayer({ m, i, url, dur, voice, name }: { m: Message; i: number; u
 }
 
 const URL_RE = /(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"])/g;
+
+/** Vorschau-Karte unter dem Text für den ersten Link der Nachricht. Feste Höhe von Anfang an
+ *  (auch solange geladen wird oder wenn es keine Vorschau gibt), damit der Chat beim Nachladen nicht springt. */
+function LinkCard({ text }: { text: string }) {
+  const u = text.match(URL_RE)?.[0];
+  const on = !!u && linkPreviewsOn();
+  const [p, setP] = useState<LinkPreview | null | undefined>(() => (u ? cachedPreview(u) : undefined));
+  const [img, setImg] = useState<'wait' | 'ok' | 'fail'>('wait');
+  useEffect(() => {
+    if (!u || !on) return;
+    let off = false;
+    void loadPreview(u).then((r) => { if (!off) setP(r); });
+    return () => { off = true; };
+  }, [u, on]);
+  if (!u || !on) return null;
+  let host = u; try { host = new URL(u).hostname.replace(/^www\./, ''); } catch { /* bleibt */ }
+  const yt = youtubeId(u);
+  const src = p?.image ?? (yt ? `/api/linkpreview/image?url=${encodeURIComponent(`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`)}` : null);
+  const title = p?.title && p.title !== host ? p.title : null;
+  const pic = src && img !== 'fail'
+    ? <img src={src} alt="" loading="lazy" decoding="async" className={img === 'ok' ? 'on' : ''} onLoad={() => setImg('ok')} onError={() => setImg('fail')} />
+    : null;
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  if (yt) return (
+    <a className="lp yt" href={u} target="_blank" rel="noreferrer noopener" onDoubleClick={stop}>
+      <span className="lp-img">{pic}<span className="lp-play"><Icon name="play" size={20} /></span></span>
+      <span className="lp-body">
+        <b className="lp-title two">{title ?? (p === undefined ? '' : 'YouTube')}</b>
+        <small className="lp-site">{p?.author ? `YouTube · ${p.author}` : 'YouTube'}</small>
+      </span>
+    </a>
+  );
+  return (
+    <a className="lp" href={u} target="_blank" rel="noreferrer noopener" onDoubleClick={stop}>
+      <span className="lp-thumb">{pic ?? <Icon name="link" size={18} />}</span>
+      <span className="lp-body">
+        <b className="lp-title">{title ?? (p === undefined ? '' : u.replace(/^https?:\/\/(www\.)?/, '').slice(0, 120))}</b>
+        <span className="lp-desc">{p?.description ?? ''}</span>
+        <small className="lp-site">{p?.site && p.site !== title ? `${p.site} · ${host}` : host}</small>
+      </span>
+    </a>
+  );
+}
 function linkify(text: string) {
   const parts = text.split(URL_RE);
   return parts.map((p, i) => (i % 2 ? <a key={i} href={p} target="_blank" rel="noreferrer noopener">{p}</a> : p));

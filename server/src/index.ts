@@ -1122,11 +1122,12 @@ app.get('/api/gallery', async (req) => {
   const chats = qs.chats ? String(qs.chats).split(',').filter(Boolean) : null;
   return H(req).store.media(kind, chats, qs.before ? Number(qs.before) : undefined, 120);
 });
-/** Link-Vorschau für die Links-Ansicht: Titel, Beschreibung, Bild (über den Server geladen) */
-app.get('/api/linkpreview', async (req) => {
+/** Link-Vorschau für Blasen und Links-Ansicht: Titel, Beschreibung, Bild (über den Server geladen) */
+app.get('/api/linkpreview', async (req, reply) => {
   const url = String((req.query as any)?.url ?? '');
   if (!/^https?:\/\//i.test(url) || url.length > 2000) throw Object.assign(new Error('Ungültiger Link'), { statusCode: 400 });
   const p = await linkPreview(url);
+  reply.header('Cache-Control', 'private, max-age=21600');
   return p ? { ...p, image: p.image ? `/api/linkpreview/image?url=${encodeURIComponent(p.image)}` : null } : { url, title: null, description: null, image: null, site: null };
 });
 app.get('/api/linkpreview/image', async (req, reply) => {

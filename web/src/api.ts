@@ -63,7 +63,7 @@ export interface Message {
   /** Selbstzerstörende Notiz: verschwindet zu diesem Zeitpunkt */
   expiresAt?: number | null;
 }
-export interface LinkPreview { url: string; title: string | null; description: string | null; image: string | null; site: string | null }
+export interface LinkPreview { url: string; title: string | null; description: string | null; image: string | null; site: string | null; author?: string | null; video?: boolean }
 export interface PublicProfile {
   id: string; name: string; initialized: boolean; invite: boolean; totp: boolean; avatar: string | null;
   kdf: { alg: string; iterations: number; salt: string } | null;

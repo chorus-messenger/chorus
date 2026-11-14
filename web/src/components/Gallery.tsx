@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { loadPreview } from '../linkPreview';
 import { api, attachmentUrl, thumbUrl, type LinkPreview, type Attachment, type Chat, type MediaKind, type Message } from '../api';
 import { NETWORKS, dayLabel, fileSize, msgTime } from '../util';
 import { Icon } from './Icon';
@@ -118,19 +119,7 @@ export function Gallery({ chatIds, title, chats, onClose, onOpen }: {
 }
 
 
-/** Link mit Vorschau (Titel, Bild), geladen über den Server; höchstens vier gleichzeitig */
-const previews = new Map<string, Promise<LinkPreview | null>>();
-let running = 0; const waiting: (() => void)[] = [];
-function loadPreview(u: string): Promise<LinkPreview | null> {
-  let p = previews.get(u);
-  if (!p) {
-    p = new Promise<void>((go) => { if (running < 4) { running++; go(); } else waiting.push(() => { running++; go(); }); })
-      .then(() => api.linkPreview(u)).catch(() => null)
-      .finally(() => { running--; waiting.shift()?.(); });
-    previews.set(u, p);
-  }
-  return p;
-}
+/** Link mit Vorschau (Titel, Bild), geladen über den Server */
 function LinkCard({ u, sub }: { u: string; sub: string }) {
   const [p, setP] = useState<LinkPreview | null | undefined>(undefined);
   const [imgOk, setImgOk] = useState(true);
