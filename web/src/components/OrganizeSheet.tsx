@@ -84,12 +84,12 @@ export function OrganizeSheet({ m, chatTitle, onClose, onInfo }: { m: Message; c
                 ? btn('shop', T('Auf „{0}“ setzen', cfg.bring.listName || 'Bring!'), () => organize.bring(data.shopping.filter((_, i) => pick[i])).then(() => T('{0} Artikel auf „{1}“ gesetzt', pick.filter(Boolean).length, cfg.bring.listName || 'Bring!')), !pick.some(Boolean))
                 : <>
                     {btn('shop', T('Liste kopieren'), async () => { await navigator.clipboard?.writeText(data.shopping.filter((_, i) => pick[i]).map((s) => s.spec ? `${s.name} (${s.spec})` : s.name).join('\n')); return T('Kopiert'); }, !pick.some(Boolean))}
-                    <small className="muted">{T('Mit Bring! verknüpfen: Einstellungen → Speicherorte.')}</small>
+                    <small className="muted">{T('Mit Bring! verknüpfen: Einstellungen → Verbindungen.')}</small>
                   </>}
             </div>
           )}
 
-          {data && !empty && !cfg?.calendar && data.events.length > 0 && <p className="muted small">{T('Tipp: In Einstellungen → Speicherorte einen Nextcloud-Kalender wählen, dann trägt Chorus Termine direkt ein.')}</p>}
+          {data && !empty && !cfg?.calendar && data.events.length > 0 && <p className="muted small">{T('Tipp: In Einstellungen → Verbindungen → Nextcloud einen Kalender wählen, dann trägt Chorus Termine direkt ein.')}</p>}
         </div>
       </div>
     </div>

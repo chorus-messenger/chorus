@@ -318,6 +318,7 @@ export interface CalEvent { title: string; start: string; end: string; allDay: b
 export interface Extracted { events: CalEvent[]; tasks: { title: string; due: string }[]; shopping: { name: string; spec: string }[] }
 export interface OrganizeSettings {
   nextcloud: boolean; calendar: string; calendarName: string; tasks: string; tasksName: string;
+  contacts: string; contactsName: string; contactsAt: number; contactsCount: number;
   bring: { email: string; hasPass: boolean; list: string; listName: string; enabled: boolean };
 }
 export const organize = {
@@ -325,6 +326,8 @@ export const organize = {
   set: (patch: Record<string, unknown>) => req<OrganizeSettings>('PUT', '/api/organize', patch),
   calendars: () => req<{ href: string; name: string; events: boolean; tasks: boolean }[]>('GET', '/api/organize/calendars'),
   bringLists: () => req<{ id: string; name: string }[]>('GET', '/api/organize/bring/lists'),
+  addressBooks: () => req<{ href: string; name: string }[]>('GET', '/api/organize/addressbooks'),
+  syncContacts: () => req<{ message: string; settings: OrganizeSettings }>('POST', '/api/organize/contacts/sync'),
   event: (e: CalEvent) => req<{ message: string }>('POST', '/api/organize/event', e),
   ics: (e: CalEvent) => req<{ ics: string }>('POST', '/api/organize/ics', e),
   task: (t: { title: string; due: string; note?: string; messageId?: string; chatId?: string }) => req<{ message: string; at?: number }>('POST', '/api/organize/task', t),

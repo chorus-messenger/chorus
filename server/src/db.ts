@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from '
 import { randomUUID } from 'node:crypto';
 import { seal, open } from './crypto.js';
 import { fixKind } from './kinds.js';
-import type { Account, Chat, Message, Network, AccountStatus, Reaction, Attachment } from './types.js';
+import type { Account, Chat, Message, Network, AccountStatus, Reaction, Attachment, ContactInfo } from './types.js';
 
 /** Verschlüsselte Datenbank (SQLCipher) + verschlüsselte Dateiablage */
 export class Store {
@@ -78,6 +78,8 @@ export class Store {
     // Galerie und Suche über alle Chats laufen neueste zuerst über ts
     this.db.exec('CREATE INDEX IF NOT EXISTS messages_remote ON messages(remote_id)');
     this.db.exec('CREATE INDEX IF NOT EXISTS messages_ts ON messages(ts)');
+    // Kontakte aus CardDAV (Nextcloud): Schlüssel = Telefonnummer (nur Ziffern mit Ländervorwahl) oder E-Mail klein
+    this.db.exec('CREATE TABLE IF NOT EXISTS contacts (key TEXT PRIMARY KEY, name TEXT NOT NULL, photo TEXT)');
   }
 
   // ---------- Einstellungen ----------
@@ -142,8 +144,56 @@ export class Store {
       customAvatar: !!r.custom_avatar, netTitle: r.title, alias: r.alias ?? null, archived: !!r.archived, info: r.info ? JSON.parse(r.info) : null, note: r.note ?? null, translate: r.translate ? JSON.parse(r.translate) : null, link: r.link ?? null, sendVia: r.link ? r.send_via ?? null : null, peer: r.peer ? JSON.parse(r.peer) : null, draft: r.draft || null, draftTs: r.draft_ts ?? null, lastMine: this.lastMine(r.id),
       avatar: (r.custom_avatar || r.avatar_file_id) ? `/api/chats/${encodeURIComponent(r.id)}/avatar?v=${String(r.custom_avatar || r.avatar_file_id).slice(0, 8)}` : null,
     };
+    const k = this.contactOf(r, c.info, c.peer);
+    if (k) {
+      if (k.name) c.title = k.name;
+      if (!c.avatar && k.photo) c.avatar = `/api/chats/${encodeURIComponent(r.id)}/avatar?v=k${k.photo.slice(0, 8)}`;
+    }
     if (r.alias) c.title = r.alias;
     return c;
+  }
+
+  // ---------- Kontakte (CardDAV) ----------
+  private contactCache: Map<string, { name: string; photo: string | null }> | null = null;
+  private contacts() {
+    if (!this.contactCache) {
+      this.contactCache = new Map();
+      for (const r of this.db.prepare('SELECT key, name, photo FROM contacts').all() as { key: string; name: string; photo: string | null }[])
+        this.contactCache.set(r.key, { name: r.name, photo: r.photo });
+    }
+    return this.contactCache;
+  }
+  /** Nur Einzelchats: Nummer bzw. Adresse des Gegenübers im Adressbuch nachschlagen */
+  private contactOf(r: any, info: ContactInfo | null | undefined, peer: { id: string } | null | undefined) {
+    if (r.kind !== 'direct') return null;
+    const map = this.contacts();
+    if (!map.size) return null;
+    for (const k of chatKeys(r.remote_id, info?.phone, peer?.id)) { const hit = map.get(k); if (hit) return hit; }
+    return null;
+  }
+  contactCount() { return (this.db.prepare('SELECT COUNT(DISTINCT name) AS n FROM contacts').get() as { n: number }).n; }
+  /** Adressbuch komplett ersetzen; Bilder mit gleichem Inhalt behalten ihre Datei */
+  replaceContacts(list: { keys: string[]; name: string; photo?: Buffer | null }[], photoHash: (b: Buffer) => string) {
+    const old = this.db.prepare('SELECT DISTINCT photo FROM contacts WHERE photo IS NOT NULL').all() as { photo: string }[];
+    const prev = this.getSetting<Record<string, string>>('contactPhotos', {});
+    const next: Record<string, string> = {};
+    const ins = this.db.prepare('INSERT OR IGNORE INTO contacts(key, name, photo) VALUES(?,?,?)');
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM contacts').run();
+      for (const c of list) {
+        let photo: string | null = null;
+        if (c.photo?.length) {
+          const h = photoHash(c.photo);
+          photo = next[h] ?? (prev[h] && this.readFile(prev[h]) ? prev[h] : this.storeFile(c.photo));
+          next[h] = photo;
+        }
+        for (const k of c.keys) ins.run(k, c.name, photo);
+      }
+    })();
+    const used = new Set(Object.values(next));
+    for (const o of old) if (!used.has(o.photo)) this.deleteFile(o.photo);
+    this.setSetting('contactPhotos', next);
+    this.contactCache = null;
   }
   /** Chat samt Nachrichten und gespeicherten Anhängen entfernen */
   deleteChat(id: string) {
@@ -195,6 +245,12 @@ export class Store {
     if (old?.custom_avatar && old.custom_avatar !== fileId) this.deleteFile(old.custom_avatar);
   }
   avatarFileOf(id: string): string | null {
+    const own = this.ownAvatarFileOf(id);
+    if (own) return own;
+    const r = this.db.prepare('SELECT * FROM chats WHERE id=?').get(id) as any;
+    return r ? this.contactOf(r, r.info ? JSON.parse(r.info) : null, r.peer ? JSON.parse(r.peer) : null)?.photo ?? null : null;
+  }
+  private ownAvatarFileOf(id: string): string | null {
     const r = this.db.prepare('SELECT custom_avatar, avatar_file_id FROM chats WHERE id=?').get(id) as { custom_avatar: string | null; avatar_file_id: string | null } | undefined;
     return r?.custom_avatar || r?.avatar_file_id || null;
   }
@@ -484,3 +540,29 @@ export class Store {
 }
 
 export type { Account, AccountStatus, Attachment };
+
+/** Telefonnummer → nur Ziffern mit Ländervorwahl (ohne Vorwahl: Deutschland bzw. CHORUS_COUNTRY) */
+export function phoneKey(raw: string): string | null {
+  let d = raw.replace(/^tel:/i, '').trim();
+  const plus = d.startsWith('+');
+  d = d.replace(/\D/g, '');
+  if (!plus) {
+    if (d.startsWith('00')) d = d.slice(2);
+    else if (d.startsWith('0')) d = (process.env.CHORUS_COUNTRY || '49') + d.slice(1);
+    else if (d.length < 10) return null; // Ortsnummer ohne Vorwahl
+  }
+  return d.length >= 7 && d.length <= 15 ? d : null;
+}
+export const mailKey = (raw: string) => { const m = raw.replace(/^mailto:/i, '').trim().toLowerCase(); return /^[^\s@]+@[^\s@]+$/.test(m) ? m : null; };
+/** Mögliche Adressbuch-Schlüssel eines Einzelchats (WhatsApp-JID, Signal-Nummer, Telefon aus den Infos, E-Mail-Absender) */
+export function chatKeys(remoteId: string, phone?: string | null, peerId?: string | null): string[] {
+  const out: string[] = [];
+  const add = (k: string | null) => { if (k && !out.includes(k)) out.push(k); };
+  const wa = remoteId.match(/^(\d{7,15})(?::\d+)?@s\.whatsapp\.net$/);
+  if (wa) add(wa[1]);
+  if (/^\+\d{7,15}$/.test(remoteId)) add(phoneKey(remoteId));
+  if (phone) add(phoneKey(phone));
+  if (peerId) add(mailKey(peerId));
+  else if (remoteId.includes('|')) add(mailKey(remoteId.split('|')[0]));
+  return out;
+}

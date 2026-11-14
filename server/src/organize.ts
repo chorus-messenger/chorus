@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Store } from './db.js';
 import { Storage, StorageError } from './storage.js';
+import { Contacts } from './contacts.js';
 
 /** Ziele für erkannte Termine, Aufgaben und Einkäufe: Nextcloud-Kalender (CalDAV), Nextcloud Tasks (VTODO), Bring! */
 export interface OrganizeSettings {
@@ -8,10 +9,13 @@ export interface OrganizeSettings {
   /** Leer = Chorus-Erinnerung statt Nextcloud Tasks */
   tasks: string; tasksName: string;
   bring: { email: string; pass: string; list: string; listName: string };
+  /** Adressbuch: leer = aus, „all“ = alle, sonst Pfad */
+  contacts: string; contactsName: string; contactsAt: number;
 }
-const DEFAULTS: OrganizeSettings = { calendar: '', calendarName: '', tasks: '', tasksName: '', bring: { email: '', pass: '', list: '', listName: '' } };
+const DEFAULTS: OrganizeSettings = { contacts: '', contactsName: '', contactsAt: 0, calendar: '', calendarName: '', tasks: '', tasksName: '', bring: { email: '', pass: '', list: '', listName: '' } };
 export interface OrganizePublic {
   nextcloud: boolean; calendar: string; calendarName: string; tasks: string; tasksName: string;
+  contacts: string; contactsName: string; contactsAt: number; contactsCount: number;
   bring: { email: string; hasPass: boolean; list: string; listName: string; enabled: boolean };
 }
 export interface CalEvent { title: string; start: string; end: string; allDay: boolean; location: string; note?: string }
@@ -35,6 +39,7 @@ export class Organize {
     return {
       nextcloud: this.storage().publicSettings().nextcloud.enabled,
       calendar: s.calendar, calendarName: s.calendarName, tasks: s.tasks, tasksName: s.tasksName,
+      contacts: s.contacts, contactsName: s.contactsName, contactsAt: s.contactsAt, contactsCount: s.contacts ? this.store.contactCount() : 0,
       bring: { email: b.email, hasPass: !!b.pass, list: b.list, listName: b.listName, enabled: !!(b.email && b.pass && b.list) },
     };
   }
@@ -43,6 +48,12 @@ export class Organize {
     const cur = this.settings;
     const str = (v: unknown, n = 300) => (v == null ? '' : String(v).trim().slice(0, n));
     for (const k of ['calendar', 'calendarName', 'tasks', 'tasksName'] as const) if (k in p) cur[k] = str(p[k]);
+    if ('contactsName' in p) cur.contactsName = str(p.contactsName);
+    if ('contacts' in p) {
+      cur.contacts = str(p.contacts);
+      if (cur.contacts && cur.contacts !== 'all' && !/^\/[^?#]*\/addressbooks\/[^?#]+$/.test(cur.contacts)) throw new StorageError(400, 'Ungültiges Adressbuch');
+      if (!cur.contacts) { cur.contactsAt = 0; this.contactsApi().clear(); }
+    }
     if ((cur.calendar && !okHref(cur.calendar)) || (cur.tasks && !okHref(cur.tasks))) throw new StorageError(400, 'Ungültiger Kalender');
     if (p.bring) {
       const b = p.bring, c = cur.bring;
@@ -57,9 +68,19 @@ export class Organize {
   }
 
   // ---------- Nextcloud CalDAV ----------
+  private contactsApi() { return new Contacts(this.store, () => this.nc()); }
+  addressBooks() { return this.contactsApi().books(); }
+  /** Adressbuch neu laden (beim Einschalten, per Knopf und alle 6 Stunden) */
+  async syncContacts(): Promise<string> {
+    const s = this.settings;
+    if (!s.contacts) throw new StorageError(400, 'Kontakte sind aus.');
+    const n = await this.contactsApi().sync(s.contacts);
+    this.store.setSetting('organize', { ...this.settings, contactsAt: Date.now() });
+    return `${n} Kontakte geladen`;
+  }
   private nc() {
     const st = this.storage();
-    if (!st.publicSettings().nextcloud.enabled) throw new StorageError(400, 'Nextcloud ist nicht eingerichtet (Einstellungen → Speicherorte).');
+    if (!st.publicSettings().nextcloud.enabled) throw new StorageError(400, 'Nextcloud ist nicht eingerichtet (Einstellungen → Verbindungen).');
     const n = st.settings.nextcloud;
     return { origin: new URL(n.url).origin, base: n.url, user: n.user, auth: 'Basic ' + Buffer.from(`${n.user}:${n.pass}`).toString('base64') };
   }
@@ -101,7 +122,7 @@ export class Organize {
   // ---------- Bring! (inoffizielle API) ----------
   private async bringLogin(force = false): Promise<{ uuid: string; token: string }> {
     const b = this.settings.bring;
-    if (!b.email || !b.pass) throw new StorageError(400, 'Bring! ist nicht eingerichtet (Einstellungen → Speicherorte).');
+    if (!b.email || !b.pass) throw new StorageError(400, 'Bring! ist nicht eingerichtet (Einstellungen → Verbindungen).');
     const cached = this.store.getSetting<{ uuid: string; token: string; exp: number } | null>('bringToken', null);
     if (!force && cached && cached.exp > Date.now() + 60_000) return cached;
     const r = await call(`${BRING}v2/bringauth`, { method: 'POST', headers: { ...bringHead(), 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ email: b.email, password: b.pass }).toString() }, 'Bring!');
