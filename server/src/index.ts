@@ -900,6 +900,7 @@ const O = (req: FastifyRequest) => new Organize(H(req).store);
 app.get('/api/organize', async (req) => O(req).publicSettings());
 app.put('/api/organize', async (req) => O(req).update((req.body ?? {}) as any));
 app.get('/api/organize/calendars', async (req) => O(req).calendars());
+app.put('/api/organize/caldav', async (req) => O(req).setCaldav((req.body as any)?.off ? null : (req.body ?? {}) as any));
 app.get('/api/organize/addressbooks', async (req) => O(req).addressBooks());
 app.post('/api/organize/contacts/sync', async (req) => ({ message: await O(req).syncContacts(), settings: O(req).publicSettings() }));
 app.get('/api/organize/bring/lists', async (req) => O(req).bringLists());

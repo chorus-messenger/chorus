@@ -89,7 +89,7 @@ export function OrganizeSheet({ m, chatTitle, onClose, onInfo }: { m: Message; c
             </div>
           )}
 
-          {data && !empty && !cfg?.calendar && data.events.length > 0 && <p className="muted small">{T('Tipp: In Einstellungen → Verbindungen → Nextcloud einen Kalender wählen, dann trägt Chorus Termine direkt ein.')}</p>}
+          {data && !empty && !cfg?.calendar && data.events.length > 0 && <p className="muted small">{T('Tipp: In Einstellungen → Verbindungen einen Kalender (Nextcloud oder iCloud) wählen, dann trägt Chorus Termine direkt ein.')}</p>}
         </div>
       </div>
     </div>
