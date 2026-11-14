@@ -19,3 +19,12 @@ test('YouTube-Links werden erkannt', () => {
   assert.equal(youtubeId('https://www.youtube.com/@kanal'), null);
   assert.equal(youtubeId('https://notyoutube.com/watch?v=dQw4w9WgXcQ'), null);
 });
+test('Link-Vorschau lässt keine privaten Adressen durch, auch nicht als IPv6-Schreibweise', async () => {
+  const { privateIp } = await import('./linkpreview.js');
+  for (const ip of ['127.0.0.1', '10.1.2.3', '192.168.178.179', '172.20.0.1', '169.254.1.1', '100.64.0.1', '0.0.0.0', '192.0.0.1',
+    '::1', '::', '::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:c0a8:b2b3', '0:0:0:0:0:ffff:c0a8:0101', '::127.0.0.1', '64:ff9b::c0a8:1',
+    'fd00::1', 'fe80::1%eth0', 'fec0::1', 'ff02::1', '2002:c0a8:101::1', 'unsinn', '1.2.3'])
+    assert.equal(privateIp(ip), true, ip);
+  for (const ip of ['8.8.8.8', '142.250.185.78', '2a00:1450:4001:82b::200e', '::ffff:8.8.8.8', '64:ff9b::808:808'])
+    assert.equal(privateIp(ip), false, ip);
+});
