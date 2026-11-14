@@ -121,7 +121,8 @@ export class Hub {
           store.touchChat(cid, msg.ts, preview, !msg.fromMe && msg.ts > prevLastTs);
           // Archivierte Chats bleiben im Archiv und melden sich nicht
           const chat = store.getChat(cid)!;
-          if (!chat.info?.fetchedAt) this.queueContact(cid);
+          // Nur wenn der Messenger Profile liefern kann und verbunden ist (sonst nur Warnungen im Log; queueStaleContacts holt es nach dem Verbinden nach)
+          if (!chat.info?.fetchedAt && this.adapters.get(accountId)?.contactInfo && this.statuses.get(accountId)?.state === 'connected') this.queueContact(cid);
           this.emit({ type: 'chat', chat });
           // Push für jede neue eingehende Nachricht bis 30 Min. Alter (verspätete Zustellung nach Neustart/Neuverbindung).
           // Keine Push für Nachgeladenes: WhatsApp-Verlauf (history/append), und Nachrichten, die älter sind als das,

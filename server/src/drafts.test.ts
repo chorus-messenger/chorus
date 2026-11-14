@@ -37,3 +37,14 @@ test('Entwurf: gerade gesendete Texte werden erkannt', () => {
   own(s, c.id, 'Bin gleich da');
   assert.deepEqual(s.recentOwnTexts(c.id, 60_000), ['Bin gleich da']);
 });
+
+test('Suche findet Dateinamen, aber keine Treffer nur in Typ oder Datei-ID', () => {
+  const s = store(); const c = chat(s, 's');
+  const msg = (text: string, attachments: any[]) => s.upsertMessage({ chatId: c.id, remoteId: 'r' + Math.random(), senderId: 'x', senderName: 'X', fromMe: false, ts: Date.now(), text,
+    replyToRemoteId: null, edited: false, deleted: false, attachments, status: 'received' });
+  msg('', [{ kind: 'file', name: 'Rechnung-Oktober.pdf', mime: 'application/pdf', fileId: '0' }]);
+  msg('', [{ kind: 'image', name: 'foto.jpg', mime: 'image/jpeg', fileId: '1' }]);
+  assert.equal(s.search('rechnung').length, 1);
+  assert.equal(s.search('application').length, 0);
+  assert.equal(s.search('foto').length, 1);
+});

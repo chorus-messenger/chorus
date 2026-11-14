@@ -39,7 +39,7 @@ export function Avatar({ name, network, size = 48, src }: { name: string; networ
   const h = hue(name);
   return (
     <span className="avatar" style={{ width: size, height: size, fontSize: size * 0.38, background: `hsl(${h} 55% 88%)`, color: `hsl(${h} 45% 30%)` }}>
-      {src ? <img className="avatar-img" src={src} alt="" /> : initials(name)}
+      {src ? <img className="avatar-img" src={src} alt="" loading="lazy" decoding="async" /> : initials(name)}
       {network && <span className="avatar-net" style={{ background: NETWORKS[network].color }} title={NETWORKS[network].name} />}
     </span>
   );

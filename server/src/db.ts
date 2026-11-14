@@ -71,6 +71,10 @@ export class Store {
     if (!cols.includes('autopilot')) this.db.exec('ALTER TABLE chats ADD COLUMN autopilot TEXT');
     for (const [c, t] of [['archived', 'INTEGER NOT NULL DEFAULT 0'], ['alias', 'TEXT'], ['custom_avatar', 'TEXT'], ['info', 'TEXT'], ['note', 'TEXT'], ['translate', 'TEXT'], ['link', 'TEXT'], ['send_via', 'TEXT'], ['peer', 'TEXT'], ['draft', 'TEXT'], ['draft_ts', 'INTEGER']] as const)
       if (!cols.includes(c)) this.db.exec(`ALTER TABLE chats ADD COLUMN ${c} ${t}`);
+    // Lesebestätigungen/Bearbeitungen ohne bekannten Chat suchen die Nachricht über remote_id (sonst jedes Mal die ganze Tabelle);
+    // Galerie und Suche über alle Chats laufen neueste zuerst über ts
+    this.db.exec('CREATE INDEX IF NOT EXISTS messages_remote ON messages(remote_id)');
+    this.db.exec('CREATE INDEX IF NOT EXISTS messages_ts ON messages(ts)');
   }
 
   // ---------- Einstellungen ----------
@@ -367,7 +371,8 @@ export class Store {
     const like = '%' + q.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
     const inChats = chatIds ? `AND chat_id IN (${chatIds.map(() => '?').join(',') || "''"})` : '';
     return this.db.prepare(`SELECT * FROM messages WHERE deleted=0 ${inChats} ${beforeTs ? 'AND ts<?' : ''}
-      AND (text LIKE ? ESCAPE '\\' OR transcript LIKE ? ESCAPE '\\' OR translation LIKE ? ESCAPE '\\' OR attachments LIKE ? ESCAPE '\\')
+      AND (text LIKE ? ESCAPE '\\' OR transcript LIKE ? ESCAPE '\\' OR translation LIKE ? ESCAPE '\\'
+        OR EXISTS (SELECT 1 FROM json_each(attachments) WHERE json_extract(value, '$.name') LIKE ? ESCAPE '\\'))
       ORDER BY ts DESC LIMIT ?`).all(...([...(chatIds ?? []), ...(beforeTs ? [beforeTs] : []), like, like, like, like, limit] as unknown[])).map((r) => this.rowToMsg(r))
       // Dateinamen: nur echte Treffer im Namen, nicht in Typ/IDs
       .filter((m) => [m.text, m.transcript, m.translation].some((t) => t?.toLowerCase().includes(q.toLowerCase())) || m.attachments.some((a) => a.name?.toLowerCase().includes(q.toLowerCase())));

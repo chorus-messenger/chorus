@@ -376,7 +376,9 @@ export function connectEvents(onEvent: (e: HubEvent) => void, onStatus: (online:
       if (ws !== sock) return; // schon durch eine neue Verbindung ersetzt
       onStatus(false);
       if (closed) return;
-      if (e.code === 4401) { onUnauthorized(); return; }
+      // Sitzung weg (z. B. Server neu gestartet): neu anmelden lassen. Klappt das, ersetzt die App diese Verbindung;
+      // sonst nach einer Pause weiter versuchen, damit die App nicht still ohne Live-Nachrichten bleibt
+      if (e.code === 4401) { onUnauthorized(); delay = Math.max(delay, 5000); }
       timer = setTimeout(open, delay);
       delay = Math.min(delay * 2, 15000);
     };

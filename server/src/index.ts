@@ -301,7 +301,10 @@ app.post('/api/logout', async (req, reply) => {
 // ---------- Ab hier nur angemeldet ----------
 app.addHook('preHandler', async (req, reply) => {
   const url = req.url.split('?')[0];
-  if (!url.startsWith('/api/') || url === '/api/state' || (req.method === 'GET' && /^\/api\/profiles\/[^/]+\/avatar$/.test(url)) || url.startsWith('/api/vault/setup') || url.startsWith('/api/vault/unlock') || url.startsWith('/api/vault/recover') || url === '/api/logout') return;
+  if (!url.startsWith('/api/') || url === '/api/state' || (req.method === 'GET' && /^\/api\/profiles\/[^/]+\/avatar$/.test(url)) || url.startsWith('/api/vault/setup') || url.startsWith('/api/vault/unlock') || url.startsWith('/api/vault/recover') || url === '/api/logout'
+    // WebSocket prüft selbst und schließt mit 4401: so merkt die App nach einem Server-Neustart, dass sie sich neu anmelden muss,
+    // statt bei einem 401 vor dem Verbindungsaufbau endlos alle 15 s neu zu verbinden (und solange keine Live-Nachrichten zu bekommen)
+    || url === '/api/ws') return;
   if (!authed(req)) return reply.code(401).send({ error: 'Nicht angemeldet' });
 });
 
