@@ -71,7 +71,8 @@ export function Lightbox() {
   const isOpen = !!open;
   useEffect(() => {
     if (!isOpen) return;
-    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); else if (e.key === 'ArrowRight') goRef.current(1); else if (e.key === 'ArrowLeft') goRef.current(-1); };
+    // Escape wie der X-Knopf: auch den eigenen Verlaufseintrag entfernen, sonst bleibt ein „toter“ Zurück-Schritt
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') closeNav(); else if (e.key === 'ArrowRight') goRef.current(1); else if (e.key === 'ArrowLeft') goRef.current(-1); };
     addEventListener('keydown', k);
     history.pushState({ lightbox: 1 }, '');
     const pop = () => close();
