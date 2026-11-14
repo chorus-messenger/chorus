@@ -49,6 +49,26 @@ export function ChatView({ chat, account, messages, onBack, loadOlder, onPatchCh
     ro.observe(t);
     return () => ro.disconnect();
   }, []);
+  // Eingabeleiste liegt ebenfalls glasig über den Nachrichten: ihre Höhe als --dock-h.
+  const dockRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const d = dockRef.current, v = d?.parentElement;
+    if (!d || !v) return;
+    let last = -1;
+    const set = () => {
+      const h = d.offsetHeight; // KI-Fenster liegt absolut darüber und zählt nicht mit
+      if (h === last) return;
+      last = h;
+      const el = scroller.current;
+      const wasBottom = !!el && el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      v.style.setProperty('--dock-h', `${h}px`);
+      if (el && wasBottom) el.scrollTop = el.scrollHeight;
+    };
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(d);
+    return () => ro.disconnect();
+  }, []);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   const [menu, setMenu] = useState<{ m: Message; x: number; y: number; picker?: boolean } | null>(null);
@@ -377,7 +397,7 @@ export function ChatView({ chat, account, messages, onBack, loadOlder, onPatchCh
       {!atBottom && <button className="to-bottom" onClick={() => scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' })}><Icon name="back" className="rot-270" /></button>}
 
       {aiAnim.mounted && <div className={`ai-backdrop ${aiAnim.closing ? 'out' : ''}`} onClick={() => setAiOpen(false)} />}
-      <div className={`chat-dock ${aiAnim.mounted ? 'ai-on' : ''}`}>
+      <div className={`chat-dock ${aiAnim.mounted ? 'ai-on' : ''}`} ref={dockRef}>
         {aiAnim.mounted && <div className={`ai-sheet ${aiAnim.closing ? 'out' : ''}`}>
           <AiPanel chat={chat} replyTo={replyTo} onClose={() => setAiOpen(false)} onError={flash}
             onUse={(text) => { setInject({ text, n: Date.now() }); setAiOpen(false); }} />
