@@ -10,7 +10,9 @@
 #  4. Wird Chorus nicht innerhalb von 4 Minuten "healthy", geht es automatisch zurück auf den alten Stand.
 #     Dieser Commit wird dann nicht noch einmal versucht (erst der nächste, oder von Hand mit --force).
 #
-# Unangetastet bleiben: data/ (Tresor, Datenbank, Dateien), .env und alle anderen Dateien,
+# Vor jedem Neustart wird das Protokoll des alten Containers nach logs/ gesichert (die letzten 30).
+#
+# Unangetastet bleiben: data/ (Tresor, Datenbank, Dateien), logs/, .env und alle anderen Dateien,
 # die nicht im Repo liegen (z. B. data.bak-*). Es wird nie "git clean" ausgeführt.
 #
 # Aufruf von Hand:  bash deploy/auto-update.sh           (nur wenn es etwas Neues gibt)
@@ -59,6 +61,7 @@ main() {
   PREV_IMG=$(docker inspect -f '{{.Image}}' "$SERVICE" 2>/dev/null || true)
   [ -n "$PREV_IMG" ] && docker tag "$PREV_IMG" "$IMAGE:vorher"
 
+  save_logs "$SERVICE" "${OLD:0:7}"
   git reset -q --hard "$NEW"
   docker tag "$IMAGE:$TAG" "$IMAGE:latest"
 
@@ -75,6 +78,7 @@ main() {
 
   log "FEHLER: $SHORT startet nicht sauber – zurück auf ${OLD:0:7}. Dieser Stand wird nicht noch einmal versucht."
   echo "$NEW" > "$FAILED_MARK"
+  save_logs "$SERVICE" "$SHORT-fehlgeschlagen"
   git reset -q --hard "$OLD"
   if [ -n "$PREV_IMG" ]; then
     docker tag "$IMAGE:vorher" "$IMAGE:latest"
@@ -84,6 +88,18 @@ main() {
 }
 
 log() { echo "[chorus-update] $*"; }
+
+# Protokoll des laufenden Containers sichern, bevor er neu erstellt wird (sonst sind die Logs mit dem alten Container weg).
+# Liegt in logs/ im Chorus-Ordner (nicht im Repo), die letzten 30 Stände bleiben, gzip-komprimiert.
+save_logs() {
+  local d="logs" f
+  docker inspect "$1" >/dev/null 2>&1 || return 0
+  mkdir -p "$d"
+  f="$d/chorus-$(date -u +%Y%m%d-%H%M%S)-$2.log.gz"
+  if docker logs --timestamps "$1" 2>&1 | gzip > "$f"; then log "Protokoll gesichert: $f"; else rm -f "$f"; fi
+  ls -1t "$d"/chorus-*.log.gz 2>/dev/null | tail -n +31 | xargs -r rm -f || true
+  return 0
+}
 
 # Wartet, bis der Healthcheck des Containers "healthy" meldet (max. 4 Minuten)
 wait_healthy() {
