@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Store } from './db.js';
 import { toOggOpusTimed } from './audio.js';
 import type { Account, AccountStatus, Adapter, AdapterEvents, Attachment, Network, OutgoingFile, Message, Chat } from './types.js';
@@ -49,6 +49,7 @@ const NOTIFY_MAX_AGE = 30 * 60_000;
 
 export class Hub {
   private adapters = new Map<string, Adapter>();
+  private sessionHash = new Map<string, string>();
   private statuses = new Map<string, AccountStatus>();
   private subscribers = new Set<(e: HubEvent) => void>();
   /** Neue eingehende Nachrichten (für den Autopiloten) */
@@ -180,7 +181,13 @@ export class Hub {
       typing: (chatRemote, on) => { const cid = chatId(chatRemote); if (store.getChat(cid)) this.emit({ type: 'typing', chatId: cid, on }); },
       storeFile: (data) => store.storeFile(data),
       getMessage: (chatRemote, remoteId) => store.getMessage(`${chatId(chatRemote)}:${remoteId}`),
-      saveSession: (data) => store.saveSession(accountId, data),
+      // Unveränderte Sitzung nicht neu schreiben: Signal sichert z. B. alle 5 Minuten ~18 MB (tar.gz), meist ohne Änderung
+      saveSession: (data) => {
+        const h = data == null ? '' : createHash('sha256').update(data).digest('base64');
+        if (data != null && this.sessionHash.get(accountId) === h) return;
+        this.sessionHash.set(accountId, h);
+        store.saveSession(accountId, data);
+      },
       log: (msg) => console.log(`[${network}:${accountId}] ${msg}`),
     };
   }
@@ -192,6 +199,7 @@ export class Hub {
     if (!f) throw new Error(`Messenger ${row.network} ist in dieser Version nicht verfügbar`);
     const old = this.adapters.get(id);
     if (old) await old.stop().catch(() => {});
+    this.sessionHash.set(id, row.session == null ? '' : createHash('sha256').update(row.session).digest('base64'));
     const adapter = f({ accountId: id, config: JSON.parse(row.config), session: row.session, events: this.makeEvents(id, row.network), dataDir: this.dataDir });
     this.adapters.set(id, adapter);
     this.statuses.set(id, { state: 'connecting' });

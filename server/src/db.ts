@@ -18,6 +18,8 @@ export class Store {
     this.db.pragma(`cipher='sqlcipher'`);
     this.db.pragma(`key="x'${dek.toString('hex')}'"`);
     this.db.pragma('journal_mode = WAL');
+    // Mit WAL sicher (kein Datenbankschaden bei Stromausfall, höchstens die letzten Sekunden fehlen) und deutlich weniger fsync
+    this.db.pragma('synchronous = NORMAL');
     this.db.pragma('foreign_keys = ON');
     this.migrate();
   }
