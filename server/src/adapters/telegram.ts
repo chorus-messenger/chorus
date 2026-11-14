@@ -197,6 +197,8 @@ export class TelegramAdapter implements Adapter {
       attachments: mediaToAttachments(m),
       reactions: mapReactions(m.reactions),
       status: m.out ? 'sent' : 'received',
+      // Selbstzerstörende Fotos/Videos (Timer oder „einmal ansehen“): Chorus sichert sie sofort und behält sie
+      ...(ttlMedia(m) ? { viewOnce: true } : {}),
     });
   }
 
@@ -337,6 +339,11 @@ export class TelegramAdapter implements Adapter {
   async logout() {
     await this.c.invoke(new Api.auth.LogOut()).catch(() => {});
   }
+}
+
+function ttlMedia(m: Api.Message): boolean {
+  const md = m.media;
+  return (md instanceof Api.MessageMediaPhoto || md instanceof Api.MessageMediaDocument) && !!md.ttlSeconds;
 }
 
 function mediaToAttachments(m: Api.Message): Attachment[] {

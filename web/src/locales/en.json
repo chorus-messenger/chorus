@@ -1076,5 +1076,14 @@
  "Links": "Links",
  "Link-Vorschau": "Link preview",
  "Titel und Bild unter Links in Nachrichten, YouTube mit Vorschaubild": "Title and image below links in messages, YouTube with thumbnail",
- "Die Vorschau lädt dein Chorus-Server, nicht dein Gerät.": "Previews are fetched by your Chorus server, not your device."
+ "Die Vorschau lädt dein Chorus-Server, nicht dein Gerät.": "Previews are fetched by your Chorus server, not your device.",
+ "Einmalansicht": "View once",
+ "Foto (Einmalansicht)": "Photo (view once)",
+ "Video (Einmalansicht)": "Video (view once)",
+ "Sprachnachricht (Einmalansicht)": "Voice message (view once)",
+ "⏱ Einmalansicht": "⏱ View once",
+ "⏱ Foto (Einmalansicht)": "⏱ Photo (view once)",
+ "⏱ Video (Einmalansicht)": "⏱ Video (view once)",
+ "⏱ Sprachnachricht (Einmalansicht)": "⏱ Voice message (view once)",
+ "Foto oder Video zur Einmalansicht. WhatsApp schickt es nur ans Handy, dort kannst du es öffnen.": "Photo or video sent as view once. WhatsApp only delivers it to your phone, open it there."
 }
