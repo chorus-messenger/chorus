@@ -1115,7 +1115,6 @@
  "Für erkannte Aufgaben": "For detected tasks",
  "Namen und Bilder": "Names and photos",
  "Für erkannte Einkäufe": "For detected shopping",
- "iCloud / CalDAV": "iCloud / CalDAV",
  "Termine": "Events",
  "Verbunden. Jetzt unten den Kalender wählen.": "Connected. Now pick the calendar below.",
  "Kalender getrennt.": "Calendar disconnected.",
@@ -1132,5 +1131,6 @@
  "Tipp: In Einstellungen → Verbindungen einen Kalender (Nextcloud oder iCloud) wählen, dann trägt Chorus Termine direkt ein.": "Tip: pick a calendar (Nextcloud or iCloud) in Settings → Connections and Chorus adds events directly.",
  "Kalender und Kontakte": "Calendars and contacts",
  "Keine Kontakte verbunden (Einstellungen → Verbindungen).": "No contacts connected (Settings → Connections).",
- "Der Server nennt keine Adressbücher": "The server lists no address books"
+ "Der Server nennt keine Adressbücher": "The server lists no address books",
+ "Eigener Server": "Own server"
 }
