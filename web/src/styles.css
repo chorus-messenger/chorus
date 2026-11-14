@@ -1056,6 +1056,8 @@ html.bubbles-net .chat-view[data-net="demo"] { --bubble-out: var(--bubble-demo);
 .composer .plus-btn.on { transform: rotate(45deg); }
 .att-menu .menu-gif { font-size: 9px; padding: 1px 3px; margin: 0 1px; }
 .att-menu-bg { position: fixed; inset: 0; z-index: 4; }
+/* In der glasigen Leiste ist .chat-dock (backdrop-filter) Bezugsrahmen für fixed: nach oben über die Nachrichten ziehen, damit Tippen daneben schließt */
+.chat-dock .att-menu-bg { top: -100vh; }
 .att-menu { position: absolute; bottom: 100%; left: 8px; margin-bottom: 8px; min-width: 230px; padding: 6px; background: var(--bg); border-radius: 16px; box-shadow: var(--shadow); z-index: 5; animation: pop-in .18s var(--ease-out) both; }
 
 /* Datei-Vorschau (ersetzt den Download-Link, der in der Home-Bildschirm-App keinen Rückweg hat) */
