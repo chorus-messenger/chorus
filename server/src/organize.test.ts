@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { eventIcs, todoIcs, localToUtc, parseCalendars, icsText } from './organize.js';
-import { cleanExtract, isoLocal } from './ai.js';
+import { cleanExtract, isoLocal, firstDate, withDateFallback } from './ai.js';
 
 test('localToUtc: Sommer- und Winterzeit Berlin', () => {
   assert.equal(new Date(localToUtc('2026-07-10T19:00', 'Europe/Berlin')).toISOString(), '2026-07-10T17:00:00.000Z');
@@ -42,4 +42,23 @@ test('cleanExtract verwirft Ungültiges', () => {
   assert.deepEqual(r.events, [{ title: 'Y', start: '2026-11-14T19:00', end: '', allDay: false, location: '' }]);
   assert.deepEqual(r.tasks, [{ title: 'Milch holen', due: '' }]);
   assert.equal(r.shopping.length, 1);
+});
+
+test('firstDate: Jahr ergänzen, nächstes Vorkommen, Monatsnamen', () => {
+  const ts = Date.parse('2026-11-14T20:00:00Z');
+  assert.equal(firstDate('Kann ich am 18.12. auf den Geburtstag einer Kollegin?', ts, 'Europe/Berlin'), '2026-12-18');
+  assert.equal(firstDate('Am 3.1. geht es los', ts, 'Europe/Berlin'), '2027-01-03');
+  assert.equal(firstDate('am 18.12.27 ist es soweit', ts, 'Europe/Berlin'), '2027-12-18');
+  assert.equal(firstDate('Feier am 5. März', ts, 'Europe/Berlin'), '2027-03-05');
+  assert.equal(firstDate('31.2. gibt es nicht', ts, 'Europe/Berlin'), null);
+  assert.equal(firstDate('Treffen um 18.30 Uhr', ts, 'Europe/Berlin'), null);
+});
+
+test('withDateFallback: nur wenn die KI nichts fand', () => {
+  const m = { text: 'Kann ich am 18.12. auf den Geburtstag einer Kollegin?', transcript: undefined, ts: Date.parse('2026-11-14T20:00:00Z') } as any;
+  const r = withDateFallback({ events: [], tasks: [], shopping: [] }, m);
+  assert.equal(r.events.length, 1);
+  assert.deepEqual({ ...r.events[0], title: '' }, { title: '', start: '2026-12-18', end: '', allDay: true, location: '' });
+  const own = { events: [{ title: 'X', start: '2026-12-18', end: '', allDay: true, location: '' }], tasks: [], shopping: [] };
+  assert.equal(withDateFallback(own, m), own);
 });
