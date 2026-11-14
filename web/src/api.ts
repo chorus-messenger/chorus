@@ -316,17 +316,20 @@ export const enc = encodeURIComponent;
 
 export interface CalEvent { title: string; start: string; end: string; allDay: boolean; location: string; note?: string }
 export interface Extracted { events: CalEvent[]; tasks: { title: string; due: string }[]; shopping: { name: string; spec: string }[] }
+export interface DavPublic { url: string; user: string; hasPass: boolean; enabled: boolean; contacts: boolean }
 export interface OrganizeSettings {
   nextcloud: boolean; calendar: string; calendarName: string; tasks: string; tasksName: string;
   contacts: string; contactsName: string; contactsAt: number; contactsCount: number;
-  caldav: { kind: 'icloud' | 'other'; url: string; user: string; hasPass: boolean; enabled: boolean; contacts: boolean };
+  icloud: DavPublic & { mail: string | null };
+  caldav: DavPublic;
   bring: { email: string; hasPass: boolean; list: string; listName: string; enabled: boolean };
 }
 export const organize = {
   get: () => req<OrganizeSettings>('GET', '/api/organize'),
   set: (patch: Record<string, unknown>) => req<OrganizeSettings>('PUT', '/api/organize', patch),
   calendars: () => req<{ href: string; name: string; events: boolean; tasks: boolean; source: string }[]>('GET', '/api/organize/calendars'),
-  setCaldav: (b: { kind: 'icloud' | 'other'; url?: string; user: string; pass: string } | { off: true }) => req<OrganizeSettings>('PUT', '/api/organize/caldav', b),
+  setDav: (slot: 'icloud' | 'caldav', b: { url?: string; user: string; pass: string } | { off: true }) => req<OrganizeSettings>('PUT', `/api/organize/dav/${slot}`, b),
+  icloudMail: (on: boolean, address?: string) => req<OrganizeSettings>('PUT', '/api/organize/icloud/mail', { on, address }),
   bringLists: () => req<{ id: string; name: string }[]>('GET', '/api/organize/bring/lists'),
   addressBooks: () => req<{ href: string; name: string; source: string }[]>('GET', '/api/organize/addressbooks'),
   syncContacts: () => req<{ message: string; settings: OrganizeSettings }>('POST', '/api/organize/contacts/sync'),

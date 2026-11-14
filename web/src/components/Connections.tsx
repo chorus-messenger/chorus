@@ -4,8 +4,8 @@ import { storageState, useStorage } from '../storageState';
 import { Icon } from './Icon';
 import { T } from '../i18n';
 
-export type ConnKind = 'nextcloud' | 'calendar' | 'immich' | 'bring';
-export const CONN_TITLES: Record<ConnKind, string> = { nextcloud: 'Nextcloud', calendar: 'iCloud', immich: 'Immich', bring: 'Bring!' };
+export type ConnKind = 'nextcloud' | 'icloud' | 'caldav' | 'immich' | 'bring';
+export const CONN_TITLES: Record<ConnKind, string> = { nextcloud: 'Nextcloud', icloud: 'iCloud', caldav: 'Eigener Server', immich: 'Immich', bring: 'Bring!' };
 
 let orgCache: OrganizeSettings | null = null;
 function useOrganize(): [OrganizeSettings | null, (s: OrganizeSettings) => void] {
@@ -42,7 +42,8 @@ export function ConnectionsList({ onOpen }: { onOpen: (k: ConnKind) => void }) {
   return (<>
     <div className="ios-card">
       <Row tile={<Tile color="#0082c9" icon="cloud" />} title="Nextcloud" sub={st?.nextcloud.enabled ? ncUses : T('Dateien, Kalender, Kontakte')} value={<Status on={!!st?.nextcloud.enabled} />} onClick={() => onOpen('nextcloud')} />
-      <Row tile={<Tile color="#3e9bf5" icon="cloud" />} title={o?.caldav.enabled && o.caldav.kind === 'other' ? T('Eigener Server') : 'iCloud'} sub={o?.caldav.enabled ? [T('Kalender'), o.contacts.startsWith('http') && T('Kontakte')].filter(Boolean).join(' · ') : T('Kalender und Kontakte')} value={<Status on={!!o?.caldav.enabled} />} onClick={() => onOpen('calendar')} />
+      <Row tile={<Tile color="#3e9bf5" icon="cloud" />} title="iCloud" sub={o?.icloud.enabled ? [o.icloud.mail && T('Mail'), T('Kalender'), o.icloud.contacts && T('Kontakte')].filter(Boolean).join(' · ') : T('Mail, Kalender, Kontakte')} value={<Status on={!!o?.icloud.enabled} />} onClick={() => onOpen('icloud')} />
+      <Row tile={<Tile color="#8e8e93" icon="server" />} title={T('Eigener Server')} sub={o?.caldav.enabled ? host(o.caldav.url) : T('Kalender und Kontakte (CalDAV/CardDAV)')} value={<Status on={!!o?.caldav.enabled} />} onClick={() => onOpen('caldav')} />
       <Row tile={<Tile color="#4250af" icon="photos" />} title="Immich" sub={T('Fotos und Videos')} value={<Status on={!!st?.immich.enabled} />} onClick={() => onOpen('immich')} />
       <Row tile={<Tile color="#e5484d" icon="check" />} title="Bring!" sub={o?.bring.listName || T('Einkaufsliste')} value={<Status on={!!o?.bring.enabled} />} onClick={() => onOpen('bring')} />
     </div>
@@ -51,7 +52,7 @@ export function ConnectionsList({ onOpen }: { onOpen: (k: ConnKind) => void }) {
 }
 
 export function ConnectionPage({ kind }: { kind: ConnKind }) {
-  return kind === 'nextcloud' ? <NextcloudPage /> : kind === 'calendar' ? <CaldavPage /> : kind === 'immich' ? <ImmichPage /> : <BringPage />;
+  return kind === 'nextcloud' ? <NextcloudPage /> : kind === 'icloud' ? <IcloudPage /> : kind === 'caldav' ? <CaldavPage /> : kind === 'immich' ? <ImmichPage /> : <BringPage />;
 }
 
 /** Anmelde-Karte: verbunden = eine Zeile mit Ändern/Trennen, sonst die Felder */
@@ -134,7 +135,7 @@ function NextcloudPage() {
 /** Adressbuch für Namen und Bilder, aus allen verbundenen Quellen (Nextcloud, iCloud, anderer Server) */
 function ContactsPick({ o, setO, busy, run }: { o: OrganizeSettings; setO: (s: OrganizeSettings) => void; busy: boolean; run: (fn: () => Promise<string | void>) => void }) {
   const [books, setBooks] = useState<{ href: string; name: string; source: string }[] | null>(null);
-  useEffect(() => { organize.addressBooks().then(setBooks, () => setBooks([])); }, [o.caldav.contacts]);
+  useEffect(() => { organize.addressBooks().then(setBooks, () => setBooks([])); }, [o.icloud.contacts, o.caldav.contacts]);
   const multi = new Set((books ?? []).map((b) => b.source)).size > 1;
   const pick = (href: string) => run(async () => {
     setO(await organize.set({ contacts: href, contactsName: href === 'all' ? '' : books?.find((b) => b.href === href)?.name ?? '' }));
@@ -154,7 +155,7 @@ type Cal = { href: string; name: string; events: boolean; tasks: boolean; source
 /** Ziel für Termine und Aufgaben, aus allen verbundenen Kalendern (Nextcloud, iCloud, anderer Server) */
 function CalendarPicks({ o, setO, busy, run }: { o: OrganizeSettings; setO: (s: OrganizeSettings) => void; busy: boolean; run: (fn: () => Promise<string | void>) => void }) {
   const [cals, setCals] = useState<Cal[] | null>(null);
-  useEffect(() => { organize.calendars().then(setCals, () => setCals([])); }, [o.caldav.enabled]);
+  useEffect(() => { organize.calendars().then(setCals, () => setCals([])); }, [o.icloud.enabled, o.caldav.enabled]);
   const multi = new Set((cals ?? []).map((c) => c.source)).size > 1;
   const opt = (c: Cal) => [c.href, multi ? `${c.name} · ${c.source}` : c.name] as [string, string];
   const pick = (kind: 'calendar' | 'tasks', href: string) => run(async () => {
@@ -168,37 +169,82 @@ function CalendarPicks({ o, setO, busy, run }: { o: OrganizeSettings; setO: (s: 
   </>);
 }
 
+function IcloudPage() {
+  const [o, setO] = useOrganize();
+  const [f, setF] = useState({ user: '', pass: '' });
+  const [addr, setAddr] = useState<string | null>(null);
+  const { busy, run, note } = useRun();
+  if (!o) return <p className="muted">{T('Lade …')}</p>;
+  const a = o.icloud;
+  const connect = () => run(async () => {
+    setO(await organize.setDav('icloud', { user: f.user || a.user, pass: f.pass }));
+    setF({ user: '', pass: '' });
+    return T('Verbunden.');
+  });
+  const off = () => run(async () => { setO(await organize.setDav('icloud', { off: true })); return T('iCloud getrennt.'); });
+  const mail = (on: boolean, address?: string) => run(async () => {
+    if (!on && !window.confirm(T('iCloud-Mail ausschalten? Die Mail-Chats von iCloud verschwinden aus Chorus (in iCloud bleibt alles).'))) return;
+    setO(await organize.icloudMail(on, address)); setAddr(null);
+    return on ? T('iCloud-Mail ist an.') : T('iCloud-Mail ist aus.');
+  });
+  const toggleMail = () => {
+    if (a.mail) return mail(false);
+    if (/@(icloud|me|mac)\.com$/i.test(a.user)) return mail(true);
+    setAddr('');
+  };
+  return (<>
+    <Login on={a.enabled} busy={busy} who={a.user} onSave={connect} onOff={off}
+      ready={!!(f.user || a.user) && (!!f.pass || a.hasPass)}
+      help={T('Mit deiner Apple-ID und einem app-spezifischen Passwort (account.apple.com → Anmelden und Sicherheit → App-spezifische Passwörter), nicht dem normalen Passwort.')}
+      fields={<>
+        <input className="input" type="email" autoComplete="off" autoCapitalize="none" placeholder={T('Apple-ID (E-Mail)')} value={f.user || a.user} onChange={(e) => setF({ ...f, user: e.target.value })} />
+        <input className="input" type="password" autoComplete="off" placeholder={a.hasPass ? T('•••••••• gespeichert') : T('App-spezifisches Passwort')} value={f.pass} onChange={(e) => setF({ ...f, pass: e.target.value })} />
+      </>} />
+    {note}
+    {a.enabled && (<>
+      <p className="ios-caption">{T('Verwenden für')}</p>
+      <div className="ios-card pad">
+        <div className="conn-pick">
+          <span className="ios-icon sm" style={{ background: '#3e9bf5' }}><Icon name="inbox" size={15} /></span>
+          <span className="conn-pick-text"><b>{T('Mail')}</b><small>{a.mail ? T('Als Chats') : T('Aus')}</small></span>
+          <input type="checkbox" className="switch" checked={!!a.mail || addr !== null} disabled={busy} onChange={toggleMail} />
+        </div>
+        {addr !== null && !a.mail && (
+          <div className="row">
+            <input className="input" type="email" autoComplete="off" autoCapitalize="none" placeholder={T('iCloud-Mail-Adresse (…@icloud.com)')} value={addr} onChange={(e) => setAddr(e.target.value)} />
+            <button className="btn primary" disabled={busy || !/@(icloud|me|mac)\.com$/i.test(addr.trim())} onClick={() => mail(true, addr.trim())}>{T('An')}</button>
+          </div>
+        )}
+        <CalendarPicks o={o} setO={setO} busy={busy} run={run} />
+        <ContactsPick o={o} setO={setO} busy={busy} run={run} />
+      </div>
+    </>)}
+  </>);
+}
+
 function CaldavPage() {
   const [o, setO] = useOrganize();
-  const [kind, setKind] = useState<'icloud' | 'other' | null>(null);
   const [f, setF] = useState({ url: '', user: '', pass: '' });
   const { busy, run, note } = useRun();
   if (!o) return <p className="muted">{T('Lade …')}</p>;
-  const k = kind ?? o.caldav.kind;
-  const icloud = k === 'icloud';
+  const a = o.caldav;
   const connect = () => run(async () => {
-    setO(await organize.setCaldav({ kind: k, url: f.url || o.caldav.url, user: f.user || o.caldav.user, pass: f.pass }));
+    setO(await organize.setDav('caldav', { url: f.url || a.url, user: f.user || a.user, pass: f.pass }));
     setF({ url: '', user: '', pass: '' });
-    return T('Verbunden. Jetzt unten den Kalender wählen.');
+    return T('Verbunden.');
   });
-  const off = () => run(async () => { setO(await organize.setCaldav({ off: true })); return T('Kalender getrennt.'); });
-  let who = o.caldav.user;
-  try { if (o.caldav.kind === 'other') who += ' · ' + new URL(o.caldav.url).host; } catch { /* ohne Host */ }
+  const off = () => run(async () => { setO(await organize.setDav('caldav', { off: true })); return T('Server getrennt.'); });
   return (<>
-    <Login on={o.caldav.enabled} busy={busy} who={o.caldav.kind === 'icloud' ? `iCloud · ${who}` : who} onSave={connect} onOff={off}
-      ready={(icloud || !!(f.url || o.caldav.url)) && !!(f.user || o.caldav.user) && (!!f.pass || o.caldav.hasPass)}
-      help={icloud ? T('Mit deiner Apple-ID und einem app-spezifischen Passwort (account.apple.com → Anmelden und Sicherheit → App-spezifische Passwörter), nicht dem normalen Passwort.') : T('Adresse des CalDAV-Servers, Chorus sucht die Kalender selbst.')}
+    <Login on={a.enabled} busy={busy} who={`${a.user} · ${host(a.url)}`} onSave={connect} onOff={off}
+      ready={!!(f.url || a.url) && !!(f.user || a.user) && (!!f.pass || a.hasPass)}
+      help={T('Für jeden CalDAV/CardDAV-Server (z. B. Radicale, Baïkal, mailbox.org). Chorus sucht Kalender und Adressbücher selbst.')}
       fields={<>
-        <div className="seg">
-          <button className={icloud ? 'on' : ''} onClick={() => setKind('icloud')}>iCloud</button>
-          <button className={!icloud ? 'on' : ''} onClick={() => setKind('other')}>{T('Anderer Server')}</button>
-        </div>
-        {!icloud && <input className="input" type="url" inputMode="url" autoComplete="off" placeholder="https://dav.example.de" value={f.url || o.caldav.url} onChange={(e) => setF({ ...f, url: e.target.value })} />}
-        <input className="input" type={icloud ? 'email' : 'text'} autoComplete="off" autoCapitalize="none" placeholder={icloud ? T('Apple-ID (E-Mail)') : T('Benutzername')} value={f.user || o.caldav.user} onChange={(e) => setF({ ...f, user: e.target.value })} />
-        <input className="input" type="password" autoComplete="off" placeholder={o.caldav.hasPass ? T('•••••••• gespeichert') : icloud ? T('App-spezifisches Passwort') : T('Passwort')} value={f.pass} onChange={(e) => setF({ ...f, pass: e.target.value })} />
+        <input className="input" type="url" inputMode="url" autoComplete="off" placeholder="https://dav.example.de" value={f.url || a.url} onChange={(e) => setF({ ...f, url: e.target.value })} />
+        <input className="input" autoComplete="off" autoCapitalize="none" placeholder={T('Benutzername')} value={f.user || a.user} onChange={(e) => setF({ ...f, user: e.target.value })} />
+        <input className="input" type="password" autoComplete="off" placeholder={a.hasPass ? T('•••••••• gespeichert') : T('Passwort')} value={f.pass} onChange={(e) => setF({ ...f, pass: e.target.value })} />
       </>} />
     {note}
-    {o.caldav.enabled && (<>
+    {a.enabled && (<>
       <p className="ios-caption">{T('Verwenden für')}</p>
       <div className="ios-card pad">
         <CalendarPicks o={o} setO={setO} busy={busy} run={run} />
