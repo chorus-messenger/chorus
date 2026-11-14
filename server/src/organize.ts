@@ -119,11 +119,20 @@ export class Organize {
     if (c.cardHome && c.pass) src.push({ label: c.kind === 'icloud' ? 'iCloud' : new URL(c.cardHome).host, auth: 'Basic ' + Buffer.from(`${c.user}:${c.pass}`).toString('base64'), home: c.cardHome, full: true });
     return new Contacts(this.store, src);
   }
-  addressBooks() { return this.contactsApi().books(); }
+  /** Ältere Verbindungen ohne Adressbuch-Suche: einmal nachholen (cardHome undefined = noch nie gesucht) */
+  private async ensureCardHome() {
+    const cur = this.settings, c = cur.caldav;
+    if (!c.home || !c.pass || c.cardHome !== undefined) return;
+    const auth = 'Basic ' + Buffer.from(`${c.user}:${c.pass}`).toString('base64');
+    c.cardHome = await discoverHome(c.kind === 'icloud' ? 'https://contacts.icloud.com' : c.url, auth, 'card').catch(() => '');
+    this.store.setSetting('organize', cur);
+  }
+  async addressBooks() { await this.ensureCardHome(); return this.contactsApi().books(); }
   /** Adressbuch neu laden (beim Einschalten, per Knopf und alle 6 Stunden) */
   async syncContacts(): Promise<string> {
     const s = this.settings;
     if (!s.contacts) throw new StorageError(400, 'Kontakte sind aus.');
+    await this.ensureCardHome();
     const n = await this.contactsApi().sync(s.contacts);
     this.store.setSetting('organize', { ...this.settings, contactsAt: Date.now() });
     return `${n} Kontakte geladen`;

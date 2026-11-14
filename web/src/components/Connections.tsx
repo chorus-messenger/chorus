@@ -202,7 +202,7 @@ function CaldavPage() {
       <p className="ios-caption">{T('Verwenden für')}</p>
       <div className="ios-card pad">
         <CalendarPicks o={o} setO={setO} busy={busy} run={run} />
-        {o.caldav.contacts && <ContactsPick o={o} setO={setO} busy={busy} run={run} />}
+        <ContactsPick o={o} setO={setO} busy={busy} run={run} />
       </div>
     </>)}
   </>);
