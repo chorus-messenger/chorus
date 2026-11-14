@@ -5,7 +5,7 @@ import { Icon } from './Icon';
 import { T } from '../i18n';
 
 export type ConnKind = 'nextcloud' | 'calendar' | 'immich' | 'bring';
-export const CONN_TITLES: Record<ConnKind, string> = { nextcloud: 'Nextcloud', calendar: 'iCloud / CalDAV', immich: 'Immich', bring: 'Bring!' };
+export const CONN_TITLES: Record<ConnKind, string> = { nextcloud: 'Nextcloud', calendar: 'iCloud', immich: 'Immich', bring: 'Bring!' };
 
 let orgCache: OrganizeSettings | null = null;
 function useOrganize(): [OrganizeSettings | null, (s: OrganizeSettings) => void] {
@@ -42,7 +42,7 @@ export function ConnectionsList({ onOpen }: { onOpen: (k: ConnKind) => void }) {
   return (<>
     <div className="ios-card">
       <Row tile={<Tile color="#0082c9" icon="cloud" />} title="Nextcloud" sub={st?.nextcloud.enabled ? ncUses : T('Dateien, Kalender, Kontakte')} value={<Status on={!!st?.nextcloud.enabled} />} onClick={() => onOpen('nextcloud')} />
-      <Row tile={<Tile color="#ff3b30" icon="clock" />} title={T('iCloud / CalDAV')} sub={o?.caldav.enabled ? [T('Kalender'), o.contacts.startsWith('http') && T('Kontakte')].filter(Boolean).join(' · ') : T('Kalender und Kontakte')} value={<Status on={!!o?.caldav.enabled} />} onClick={() => onOpen('calendar')} />
+      <Row tile={<Tile color="#3e9bf5" icon="cloud" />} title={o?.caldav.enabled && o.caldav.kind === 'other' ? T('Eigener Server') : 'iCloud'} sub={o?.caldav.enabled ? [T('Kalender'), o.contacts.startsWith('http') && T('Kontakte')].filter(Boolean).join(' · ') : T('Kalender und Kontakte')} value={<Status on={!!o?.caldav.enabled} />} onClick={() => onOpen('calendar')} />
       <Row tile={<Tile color="#4250af" icon="photos" />} title="Immich" sub={T('Fotos und Videos')} value={<Status on={!!st?.immich.enabled} />} onClick={() => onOpen('immich')} />
       <Row tile={<Tile color="#e5484d" icon="check" />} title="Bring!" sub={o?.bring.listName || T('Einkaufsliste')} value={<Status on={!!o?.bring.enabled} />} onClick={() => onOpen('bring')} />
     </div>
