@@ -137,6 +137,32 @@ export function ChatList({ chats, accounts, filter, setFilter, active, onOpen, o
 
   const listRef = useRef<HTMLUListElement>(null);
 
+  // Wie bei Signal: Suche scrollt mit weg und blendet dabei aus, der Kopf bleibt stehen und
+  // die Liste läuft milchig unter ihm durch. Nur opacity/transform per Scroll, kein Re-Render.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    let raf = 0;
+    const apply = () => {
+      raf = 0;
+      const y = Math.max(0, el.scrollTop);
+      const s = searchRef.current;
+      if (s) {
+        const h = s.offsetHeight || 40;
+        const k = Math.min(1, y / h);
+        s.style.opacity = k ? String(Math.max(0, 1 - k * 1.4)) : '';
+        s.style.transform = k ? `scale(${1 - k * 0.08})` : '';
+      }
+      el.classList.toggle('scrolled', y > 2);
+    };
+    const on = () => { if (!raf) raf = requestAnimationFrame(apply); };
+    el.addEventListener('scroll', on, { passive: true });
+    apply();
+    return () => { el.removeEventListener('scroll', on); if (raf) cancelAnimationFrame(raf); };
+  }, []);
+
   // „Neue Nachricht“ zeigt Text, solange er in den Listenkopf passt; sonst nur das Symbol.
   const headRef = useRef<HTMLElement>(null);
   const [newCompact, setNewCompact] = useState(false);
@@ -165,6 +191,7 @@ export function ChatList({ chats, accounts, filter, setFilter, active, onOpen, o
 
   return (
     <section className="pane-list">
+      <div className="list-scroll" ref={scrollRef}>
       {sel ? (
         <header className="list-head select-head">
           <button className="icon-btn" onClick={done} aria-label={T('Fertig')}><Icon name="close" /></button>
@@ -190,7 +217,7 @@ export function ChatList({ chats, accounts, filter, setFilter, active, onOpen, o
           </div>}
         </header>
       )}
-      <div className="search">
+      <div className="search" ref={searchRef}>
         <Icon name="search" size={18} />
         <input placeholder={T('Suchen')} value={q} onChange={(e) => setQ(e.target.value)} />
         {q && <button className="icon-btn small" onClick={() => setQ('')}><Icon name="close" size={16} /></button>}
@@ -242,6 +269,7 @@ export function ChatList({ chats, accounts, filter, setFilter, active, onOpen, o
           </li>
         )}
       </ul>
+      </div>
       {sel && (
         <div className="select-bar">
           {(() => {
