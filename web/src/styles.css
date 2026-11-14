@@ -448,8 +448,13 @@ button.st.failed { all: unset; display: inline-flex; color: #fca5a5; cursor: poi
 /* Glas-Kopf wie bei Signal: Liste scrollt unter dem stehenden Kopf durch, Suche scrollt mit weg */
 .list-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .pane-list .chats { overflow: visible; flex: none; min-height: auto; }
-.list-scroll > .list-head { position: sticky; top: 0; z-index: 3;
-  background: color-mix(in srgb, var(--bg) 72%, transparent); -webkit-backdrop-filter: saturate(1.8) blur(20px); backdrop-filter: saturate(1.8) blur(20px); }
+/* Oben voll deckend (versteckt die Kante unter der iOS-Statusleiste), nach unten zunehmend glasig */
+.list-scroll > .list-head, .chat-top { --glass: linear-gradient(to bottom, var(--bg) 0, var(--bg) var(--safe-t), color-mix(in srgb, var(--bg) 92%, transparent) calc(var(--safe-t) + 10px), color-mix(in srgb, var(--bg) 55%, transparent) 100%);
+  background: var(--glass); -webkit-backdrop-filter: saturate(1.8) blur(20px); backdrop-filter: saturate(1.8) blur(20px); }
+.list-scroll > .list-head { position: sticky; top: 0; z-index: 3; }
+.chat-top { position: absolute; top: 0; left: 0; right: 0; z-index: 3; }
+.chat-top .chat-head, .chat-top .pin-bar { background: transparent; }
+.chat-view .messages { padding-top: calc(12px + var(--top-h, 64px)); scroll-padding-top: var(--top-h, 64px); }
 .list-scroll > .list-head::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--line); opacity: 0; transition: opacity .2s; }
 .list-scroll.scrolled > .list-head::after { opacity: 1; }
 .list-scroll > .search { transform-origin: 50% 0; }

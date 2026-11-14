@@ -38,6 +38,17 @@ export function ChatView({ chat, account, messages, onBack, loadOlder, onPatchCh
 }) {
   const [contact, setContact] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
+  // Kopf (+ Pin-Leiste) liegt glasig über der Liste; ihre Höhe wird als --top-h zum Abstand oben.
+  const topRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const t = topRef.current, v = t?.parentElement;
+    if (!t || !v) return;
+    const set = () => v.style.setProperty('--top-h', `${t.offsetHeight}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(t);
+    return () => ro.disconnect();
+  }, []);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   const [menu, setMenu] = useState<{ m: Message; x: number; y: number; picker?: boolean } | null>(null);
@@ -282,6 +293,7 @@ export function ChatView({ chat, account, messages, onBack, loadOlder, onPatchCh
 
   return (
     <div className={`chat-view${theme.bg ? ' own-bg' : ''}${pin ? ' has-pin' : ''}`} style={chatThemeStyle(theme) as React.CSSProperties | undefined} data-net={chat.network} onDragOver={(e) => e.preventDefault()}>
+      <div className="chat-top" ref={topRef}>
       <header className={`chat-head${chat.network === 'email' ? ' mail' : ''}`}>
         <button className="icon-btn back" onClick={onBack} aria-label={T('Zurück')}><Icon name="back" /></button>
         <button className="chat-head-who" onClick={() => setContact(true)} aria-label={T('Profil anzeigen')}>
@@ -335,6 +347,7 @@ export function ChatView({ chat, account, messages, onBack, loadOlder, onPatchCh
           </span>
         </button>
       )}
+      </div>
       {missed && ai?.features.text && ai.catchUp !== false && (
         missed.text
           ? <div className="catchup-card"><Icon name="sparkle" size={16} /><span>{missed.text}</span><button className="icon-btn small" onClick={() => setMissed(null)} aria-label={T('Schließen')}><Icon name="close" size={14} /></button></div>
