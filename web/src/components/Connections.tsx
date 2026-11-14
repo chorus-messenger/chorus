@@ -38,11 +38,11 @@ function Row({ tile, title, sub, value, onClick }: { tile: ReactNode; title: str
 export function ConnectionsList({ onOpen }: { onOpen: (k: ConnKind) => void }) {
   const st = useStorage();
   const [o] = useOrganize();
-  const ncUses = [T('Dateien'), o?.calendar && !o.calendar.startsWith('http') && T('Kalender'), o?.tasks && !o.tasks.startsWith('http') && T('Aufgaben'), o?.contacts && T('Kontakte')].filter(Boolean).join(' · ');
+  const ncUses = [T('Dateien'), o?.calendar && !o.calendar.startsWith('http') && T('Kalender'), o?.tasks && !o.tasks.startsWith('http') && T('Aufgaben'), o?.contacts && !o.contacts.startsWith('http') && T('Kontakte')].filter(Boolean).join(' · ');
   return (<>
     <div className="ios-card">
       <Row tile={<Tile color="#0082c9" icon="cloud" />} title="Nextcloud" sub={st?.nextcloud.enabled ? ncUses : T('Dateien, Kalender, Kontakte')} value={<Status on={!!st?.nextcloud.enabled} />} onClick={() => onOpen('nextcloud')} />
-      <Row tile={<Tile color="#ff3b30" icon="clock" />} title={T('iCloud / CalDAV')} sub={o?.caldav.enabled ? (o.calendar.startsWith('http') ? o.calendarName : T('Kalender')) : T('Kalender von iCloud oder anderen')} value={<Status on={!!o?.caldav.enabled} />} onClick={() => onOpen('calendar')} />
+      <Row tile={<Tile color="#ff3b30" icon="clock" />} title={T('iCloud / CalDAV')} sub={o?.caldav.enabled ? [T('Kalender'), o.contacts.startsWith('http') && T('Kontakte')].filter(Boolean).join(' · ') : T('Kalender und Kontakte')} value={<Status on={!!o?.caldav.enabled} />} onClick={() => onOpen('calendar')} />
       <Row tile={<Tile color="#4250af" icon="photos" />} title="Immich" sub={T('Fotos und Videos')} value={<Status on={!!st?.immich.enabled} />} onClick={() => onOpen('immich')} />
       <Row tile={<Tile color="#e5484d" icon="check" />} title="Bring!" sub={o?.bring.listName || T('Einkaufsliste')} value={<Status on={!!o?.bring.enabled} />} onClick={() => onOpen('bring')} />
     </div>
@@ -94,12 +94,10 @@ function NextcloudPage() {
   const s = useStorage();
   const [o, setO] = useOrganize();
   const [f, setF] = useState({ url: '', user: '', pass: '' });
-  const [books, setBooks] = useState<{ href: string; name: string }[] | null>(null);
   const { busy, run, note } = useRun();
   const on = !!s?.nextcloud.enabled;
   useEffect(() => {
     if (!on) return;
-    organize.addressBooks().then(setBooks, () => setBooks([]));
   }, [on]);
   if (!s) return <p className="muted">{T('Lade …')}</p>;
 
@@ -109,12 +107,6 @@ function NextcloudPage() {
     return (await api.testStorage('nextcloud')).message;
   });
   const off = () => run(async () => { storageState.set(await api.setStorage({ nextcloud: { enabled: false } })); return T('Nextcloud getrennt.'); });
-  const pickBook = (href: string) => run(async () => {
-    setO(await organize.set({ contacts: href, contactsName: href === 'all' ? '' : books?.find((b) => b.href === href)?.name ?? '' }));
-    if (!href) return T('Kontakte aus.');
-    const r = await organize.syncContacts(); setO(r.settings); return T('{0} Kontakte geladen', r.settings.contactsCount);
-  });
-  const syncNow = () => run(async () => { const r = await organize.syncContacts(); setO(r.settings); return T('{0} Kontakte geladen', r.settings.contactsCount); });
 
   return (<>
     <Login on={on} busy={busy} who={`${s.nextcloud.user} · ${host(s.nextcloud.url)}`} onSave={connect} onOff={off}
@@ -131,15 +123,31 @@ function NextcloudPage() {
       <p className="ios-caption">{T('Verwenden für')}</p>
       <div className="ios-card pad">
         <CalendarPicks o={o} setO={setO} busy={busy} run={run} />
-        <Pick icon="users" color="#34c759" label={T('Kontakte')} value={o.contacts} busy={busy || !books}
-          hint={o.contacts ? T('{0} Kontakte', o.contactsCount) : T('Namen und Bilder')}
-          options={[['', books ? T('Aus') : T('Lade …')], ['all', T('Alle')], ...(books ?? []).map((b) => [b.href, b.name] as [string, string])]} onChange={pickBook}
-          extra={o.contacts ? <button className="icon-btn" title={T('Jetzt abgleichen')} disabled={busy} onClick={syncNow}><Icon name="refresh" size={18} /></button> : null} />
+        <ContactsPick o={o} setO={setO} busy={busy} run={run} />
         <FolderPick folder={s.nextcloud.folder} busy={busy} onSave={(folder) => run(async () => { storageState.set(await api.setStorage({ nextcloud: { folder } })); })} />
       </div>
       <p className="ios-foot">{T('Kontakte werden alle 6 Stunden neu geladen. Eigene Namen in Chorus gehen vor.')}</p>
     </>)}
   </>);
+}
+
+/** Adressbuch für Namen und Bilder, aus allen verbundenen Quellen (Nextcloud, iCloud, anderer Server) */
+function ContactsPick({ o, setO, busy, run }: { o: OrganizeSettings; setO: (s: OrganizeSettings) => void; busy: boolean; run: (fn: () => Promise<string | void>) => void }) {
+  const [books, setBooks] = useState<{ href: string; name: string; source: string }[] | null>(null);
+  useEffect(() => { organize.addressBooks().then(setBooks, () => setBooks([])); }, [o.caldav.contacts]);
+  const multi = new Set((books ?? []).map((b) => b.source)).size > 1;
+  const pick = (href: string) => run(async () => {
+    setO(await organize.set({ contacts: href, contactsName: href === 'all' ? '' : books?.find((b) => b.href === href)?.name ?? '' }));
+    if (!href) return T('Kontakte aus.');
+    const r = await organize.syncContacts(); setO(r.settings); return T('{0} Kontakte geladen', r.settings.contactsCount);
+  });
+  const syncNow = () => run(async () => { const r = await organize.syncContacts(); setO(r.settings); return T('{0} Kontakte geladen', r.settings.contactsCount); });
+  return (
+    <Pick icon="users" color="#34c759" label={T('Kontakte')} value={o.contacts} busy={busy || !books}
+      hint={o.contacts ? T('{0} Kontakte', o.contactsCount) : T('Namen und Bilder')}
+      options={[['', books ? T('Aus') : T('Lade …')], ['all', T('Alle')], ...(books ?? []).map((b) => [b.href, multi ? `${b.name} · ${b.source}` : b.name] as [string, string])]} onChange={pick}
+      extra={o.contacts ? <button className="icon-btn" title={T('Jetzt abgleichen')} disabled={busy} onClick={syncNow}><Icon name="refresh" size={18} /></button> : null} />
+  );
 }
 
 type Cal = { href: string; name: string; events: boolean; tasks: boolean; source: string };
@@ -192,7 +200,10 @@ function CaldavPage() {
     {note}
     {o.caldav.enabled && (<>
       <p className="ios-caption">{T('Verwenden für')}</p>
-      <div className="ios-card pad"><CalendarPicks o={o} setO={setO} busy={busy} run={run} /></div>
+      <div className="ios-card pad">
+        <CalendarPicks o={o} setO={setO} busy={busy} run={run} />
+        {o.caldav.contacts && <ContactsPick o={o} setO={setO} busy={busy} run={run} />}
+      </div>
     </>)}
   </>);
 }

@@ -33,3 +33,16 @@ test('Adressbücher ohne automatisch erzeugte', () => {
 </d:multistatus>`;
   assert.deepEqual(parseBooks(xml), [{ href: '/remote.php/dav/addressbooks/users/w/contacts/', name: 'Kontakte' }]);
 });
+
+test('Adressbuch-Quellen: Pfade nur für Nextcloud, URLs nur unterhalb der fremden Sammlung', async () => {
+  const { Contacts } = await import('./contacts.js');
+  const c = new Contacts({} as any, [
+    { label: 'Nextcloud', auth: '', home: 'https://cloud.example.de/remote.php/dav/addressbooks/users/w/', full: false },
+    { label: 'iCloud', auth: '', home: 'https://p63-contacts.icloud.com/123/carddavhome/', full: true },
+  ]);
+  assert.equal(c.okBook('/remote.php/dav/addressbooks/users/w/contacts/'), true);
+  assert.equal(c.okBook('https://p63-contacts.icloud.com/123/carddavhome/card/'), true);
+  assert.equal(c.okBook('https://p63-contacts.icloud.com/123/carddavhome/'), false);
+  assert.equal(c.okBook('https://evil.example/123/carddavhome/card/'), false);
+  assert.equal(c.okBook('/123/carddavhome/card/'), false);
+});
