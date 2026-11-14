@@ -86,10 +86,17 @@ if (vv) {
     // Safari schiebt beim Fokus die ganze Seite hoch, wenn das Feld unten unter der späteren Tastatur liegt,
     // und beim Wegklappen wieder zurück. Das war das Flackern (erst weiße Fläche, dann wandert der Chat).
     // Ist das Feld im Moment des Fokus durchsichtig, verzichtet Safari darauf; die App schrumpft ja ohnehin selbst.
+    // Safari entscheidet erst, wenn die Tastatur anläuft (nicht sofort beim Fokus); nur einen Tick unsichtbar
+    // reichte deshalb nur manchmal. Darum kurz unsichtbar lassen und sanft wieder einblenden.
     const el = e.target as HTMLElement | null;
-    if (typing() && el?.style) {
+    if (touch && typing() && el?.style) {
+      el.style.transition = 'none';
       el.style.opacity = '0';
-      setTimeout(() => { el.style.opacity = ''; });
+      setTimeout(() => {
+        el.style.transition = 'opacity .15s ease-out';
+        el.style.opacity = '';
+        setTimeout(() => { el.style.transition = ''; }, 200);
+      }, 150);
     }
     if (typing() && kbH && maxH - vv.height < 120) { set(maxH - kbH, true); settle(); } // vorausgleiten
     else fit();
