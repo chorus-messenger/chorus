@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Store } from './db.js';
 import { Storage, StorageError, baseUrl } from './storage.js';
-import { Contacts } from './contacts.js';
+import { Contacts, type BookSource } from './contacts.js';
 
 /** Ziele für erkannte Termine, Aufgaben und Einkäufe: Nextcloud-Kalender (CalDAV), Nextcloud Tasks (VTODO), Bring! */
 export interface OrganizeSettings {
@@ -12,13 +12,13 @@ export interface OrganizeSettings {
   /** Adressbuch: leer = aus, „all“ = alle, sonst Pfad */
   contacts: string; contactsName: string; contactsAt: number;
   /** Zusätzlicher CalDAV-Server (iCloud oder anderer); home = gefundene Kalender-Sammlung (volle URL) */
-  caldav: { kind: 'icloud' | 'other'; url: string; user: string; pass: string; home: string };
+  caldav: { kind: 'icloud' | 'other'; url: string; user: string; pass: string; home: string; cardHome?: string };
 }
 const DEFAULTS: OrganizeSettings = { contacts: '', contactsName: '', contactsAt: 0, caldav: { kind: 'icloud', url: '', user: '', pass: '', home: '' }, calendar: '', calendarName: '', tasks: '', tasksName: '', bring: { email: '', pass: '', list: '', listName: '' } };
 export interface OrganizePublic {
   nextcloud: boolean; calendar: string; calendarName: string; tasks: string; tasksName: string;
   contacts: string; contactsName: string; contactsAt: number; contactsCount: number;
-  caldav: { kind: 'icloud' | 'other'; url: string; user: string; hasPass: boolean; enabled: boolean };
+  caldav: { kind: 'icloud' | 'other'; url: string; user: string; hasPass: boolean; enabled: boolean; contacts: boolean };
   bring: { email: string; hasPass: boolean; list: string; listName: string; enabled: boolean };
 }
 export interface CalEvent { title: string; start: string; end: string; allDay: boolean; location: string; note?: string }
@@ -42,7 +42,7 @@ export class Organize {
     return {
       nextcloud: this.storage().publicSettings().nextcloud.enabled,
       calendar: s.calendar, calendarName: s.calendarName, tasks: s.tasks, tasksName: s.tasksName,
-      caldav: { kind: s.caldav.kind, url: s.caldav.url, user: s.caldav.user, hasPass: !!s.caldav.pass, enabled: !!(s.caldav.home && s.caldav.pass) },
+      caldav: { kind: s.caldav.kind, url: s.caldav.url, user: s.caldav.user, hasPass: !!s.caldav.pass, enabled: !!(s.caldav.home && s.caldav.pass), contacts: !!(s.caldav.cardHome && s.caldav.pass) },
       contacts: s.contacts, contactsName: s.contactsName, contactsAt: s.contactsAt, contactsCount: s.contacts ? this.store.contactCount() : 0,
       bring: { email: b.email, hasPass: !!b.pass, list: b.list, listName: b.listName, enabled: !!(b.email && b.pass && b.list) },
     };
@@ -55,7 +55,7 @@ export class Organize {
     if ('contactsName' in p) cur.contactsName = str(p.contactsName);
     if ('contacts' in p) {
       cur.contacts = str(p.contacts);
-      if (cur.contacts && cur.contacts !== 'all' && !/^\/[^?#]*\/addressbooks\/[^?#]+$/.test(cur.contacts)) throw new StorageError(400, 'Ungültiges Adressbuch');
+      if (cur.contacts && cur.contacts !== 'all' && !this.contactsApi().okBook(cur.contacts)) throw new StorageError(400, 'Ungültiges Adressbuch');
       if (!cur.contacts) { cur.contactsAt = 0; this.contactsApi().clear(); }
     }
     if ((cur.calendar && !this.okTarget(cur.calendar)) || (cur.tasks && !this.okTarget(cur.tasks))) throw new StorageError(400, 'Ungültiger Kalender');
@@ -80,6 +80,7 @@ export class Organize {
       cur.caldav = { ...DEFAULTS.caldav };
       if (drop(cur.calendar)) { cur.calendar = ''; cur.calendarName = ''; }
       if (drop(cur.tasks)) { cur.tasks = ''; cur.tasksName = ''; }
+      if (drop(cur.contacts)) { cur.contacts = ''; cur.contactsName = ''; this.contactsApi().clear(); }
       this.store.setSetting('organize', cur);
       return this.publicSettings();
     }
@@ -88,8 +89,11 @@ export class Organize {
     const user = String(p.user ?? '').trim();
     const pass = p.pass ? String(p.pass).trim().replace(kind === 'icloud' ? /\s+/g : /^$/, '') : cur.caldav.pass;
     if (!/^https:\/\/[^/\s]+/.test(url) || !user || !pass) throw new StorageError(400, 'Adresse, Benutzer und Passwort fehlen');
-    const home = await discoverHome(url, 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64'));
-    cur.caldav = { kind, url, user, pass, home };
+    const auth = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
+    const home = await discoverHome(url, auth);
+    // Kontakte über dieselbe Anmeldung (iCloud: eigener Server); ohne Adressbücher geht es trotzdem weiter
+    const cardHome = await discoverHome(kind === 'icloud' ? 'https://contacts.icloud.com' : url, auth, 'card').catch(() => '');
+    cur.caldav = { kind, url, user, pass, home, cardHome };
     this.store.setSetting('organize', cur);
     return this.publicSettings();
   }
@@ -104,7 +108,17 @@ export class Organize {
     const home = this.settings.caldav.home;
     return !!home && h.startsWith(home) && h.length > home.length && !h.includes('..') && !/[?#]/.test(h);
   }
-  private contactsApi() { return new Contacts(this.store, () => this.nc()); }
+  /** Adressbuch-Quellen: Nextcloud (Pfade) und der CalDAV-Zugang (volle URLs), je nachdem was verbunden ist */
+  private contactsApi() {
+    const src: BookSource[] = [];
+    if (this.storage().publicSettings().nextcloud.enabled) {
+      const n = this.nc();
+      src.push({ label: 'Nextcloud', auth: n.auth, home: `${n.base}/remote.php/dav/addressbooks/users/${encodeURIComponent(n.user)}/`, full: false });
+    }
+    const c = this.settings.caldav;
+    if (c.cardHome && c.pass) src.push({ label: c.kind === 'icloud' ? 'iCloud' : new URL(c.cardHome).host, auth: 'Basic ' + Buffer.from(`${c.user}:${c.pass}`).toString('base64'), home: c.cardHome, full: true });
+    return new Contacts(this.store, src);
+  }
   addressBooks() { return this.contactsApi().books(); }
   /** Adressbuch neu laden (beim Einschalten, per Knopf und alle 6 Stunden) */
   async syncContacts(): Promise<string> {
@@ -248,23 +262,24 @@ async function propfind(url: string, auth: string, body: string, depth = '0'): P
   throw new StorageError(422, 'Kalender-Server: zu viele Weiterleitungen');
 }
 /** RFC 6764: Adresse → Benutzer (current-user-principal) → Kalender-Sammlung (calendar-home-set) */
-export async function discoverHome(base: string, auth: string): Promise<string> {
-  const P = '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:current-user-principal/><c:calendar-home-set/></d:prop></d:propfind>';
+export async function discoverHome(base: string, auth: string, kind: 'cal' | 'card' = 'cal'): Promise<string> {
+  const prop = kind === 'cal' ? 'calendar-home-set' : 'addressbook-home-set';
+  const P = `<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:${kind === 'cal' ? 'caldav' : 'carddav'}"><d:prop><d:current-user-principal/><c:${prop}/></d:prop></d:propfind>`;
   let res: { status: number; text: string; url: string } | null = null;
-  for (const u of [base, new URL('/.well-known/caldav', base).toString()]) {
+  for (const u of [base, new URL(`/.well-known/${kind === 'cal' ? 'caldav' : 'carddav'}`, base).toString()]) {
     const r = await propfind(u, auth, P);
     if (r.status === 401) throw new StorageError(400, 'Der Server lehnt Benutzer oder Passwort ab (bei iCloud ein app-spezifisches Passwort nehmen)');
-    if (r.status === 207) { res = r; if (hrefIn(r.text, 'calendar-home-set') || hrefIn(r.text, 'current-user-principal')) break; }
+    if (r.status === 207) { res = r; if (hrefIn(r.text, prop) || hrefIn(r.text, 'current-user-principal')) break; }
   }
   if (!res) throw new StorageError(422, 'Unter dieser Adresse wurde kein Kalender-Server gefunden');
-  let home = hrefIn(res.text, 'calendar-home-set');
+  let home = hrefIn(res.text, prop);
   if (!home) {
     const principal = hrefIn(res.text, 'current-user-principal');
     if (!principal) throw new StorageError(422, 'Der Server nennt kein Benutzerkonto');
     const r = await propfind(new URL(unxml(principal), res.url).toString(), auth, P);
     if (r.status !== 207) throw new StorageError(422, `Kalender-Server antwortet mit ${r.status}`);
-    home = hrefIn(r.text, 'calendar-home-set');
-    if (!home) throw new StorageError(422, 'Der Server nennt keine Kalender');
+    home = hrefIn(r.text, prop);
+    if (!home) throw new StorageError(422, kind === 'cal' ? 'Der Server nennt keine Kalender' : 'Der Server nennt keine Adressbücher');
     res = r;
   }
   const u = new URL(unxml(home), res.url);

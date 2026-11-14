@@ -319,7 +319,7 @@ export interface Extracted { events: CalEvent[]; tasks: { title: string; due: st
 export interface OrganizeSettings {
   nextcloud: boolean; calendar: string; calendarName: string; tasks: string; tasksName: string;
   contacts: string; contactsName: string; contactsAt: number; contactsCount: number;
-  caldav: { kind: 'icloud' | 'other'; url: string; user: string; hasPass: boolean; enabled: boolean };
+  caldav: { kind: 'icloud' | 'other'; url: string; user: string; hasPass: boolean; enabled: boolean; contacts: boolean };
   bring: { email: string; hasPass: boolean; list: string; listName: string; enabled: boolean };
 }
 export const organize = {
@@ -328,7 +328,7 @@ export const organize = {
   calendars: () => req<{ href: string; name: string; events: boolean; tasks: boolean; source: string }[]>('GET', '/api/organize/calendars'),
   setCaldav: (b: { kind: 'icloud' | 'other'; url?: string; user: string; pass: string } | { off: true }) => req<OrganizeSettings>('PUT', '/api/organize/caldav', b),
   bringLists: () => req<{ id: string; name: string }[]>('GET', '/api/organize/bring/lists'),
-  addressBooks: () => req<{ href: string; name: string }[]>('GET', '/api/organize/addressbooks'),
+  addressBooks: () => req<{ href: string; name: string; source: string }[]>('GET', '/api/organize/addressbooks'),
   syncContacts: () => req<{ message: string; settings: OrganizeSettings }>('POST', '/api/organize/contacts/sync'),
   event: (e: CalEvent) => req<{ message: string }>('POST', '/api/organize/event', e),
   ics: (e: CalEvent) => req<{ ics: string }>('POST', '/api/organize/ics', e),
