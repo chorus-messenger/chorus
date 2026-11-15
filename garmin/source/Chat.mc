@@ -1,3 +1,4 @@
+import Toybox.Communications;
 import Toybox.Graphics;
 import Toybox.Lang;
 import Toybox.System;
@@ -17,6 +18,10 @@ class ChatView extends WatchUi.View {
     private var _loading as Boolean = false;
     private var _font as Graphics.FontDefinition = Graphics.FONT_SMALL;
     private var _top as Number = 0;
+    // Vorschaubilder je Nachrichten-ID
+    private const THUMB = 170;
+    private var _thumbs as Dictionary = {};
+    private var _queue as Array<Dictionary> = [] as Array<Dictionary>;
     // Abstand zwischen Nachrichten und zwischen Kopfzeile und Text
     private const GAP = 30;
     private const GAP_HEAD = 4;
@@ -57,6 +62,7 @@ class ChatView extends WatchUi.View {
         msgs = data.get("msgs") as Array<Dictionary>;
         _blocks = null; // beim nächsten Zeichnen neu umbrechen, ans Ende springen
         WatchUi.requestUpdate();
+        loadThumbs();
     }
 
     //! Letzte Sprachnachricht ohne Transkript (für „Transkribieren“)
@@ -110,9 +116,7 @@ class ChatView extends WatchUi.View {
                 head = from + " · " + head;
             }
             var text = m.get("text") as String;
-            if (m.get("u") instanceof String) {
-                text = text + "\n" + Ui.str(m.get("vid") != null ? Rez.Strings.TapVideo : Rez.Strings.TapPhoto);
-            }
+            var hasImg = m.get("u") instanceof String;
             var wrapped = Graphics.fitTextToArea(text, font, w, lineH * 30, true);
             if (wrapped == null) {
                 wrapped = text;
@@ -120,7 +124,10 @@ class ChatView extends WatchUi.View {
             // Echte Höhe des umbrochenen Texts statt Zeilen zählen (Zeilenabstand ist größer als die Schrifthöhe)
             var textH = dc.getTextDimensions(wrapped as String, font)[1];
             var h = headH + GAP_HEAD + textH + GAP;
-            blocks.add([head, wrapped, m.get("me") == true, h, i]);
+            if (hasImg) {
+                h += THUMB + 8;
+            }
+            blocks.add([head, wrapped, m.get("me") == true, h, i, textH]);
             total += h;
         }
         _blocks = blocks;
@@ -169,6 +176,10 @@ class ChatView extends WatchUi.View {
                     dc.drawText(x, y, Graphics.FONT_XTINY, b[0] as String, just);
                     dc.setColor(mine ? 0x7CC4F5 : Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
                     dc.drawText(x, y + headH + GAP_HEAD, _font, b[1] as String, just);
+                    var m = (msgs as Array<Dictionary>)[b[4] as Number];
+                    if (m.get("u") instanceof String) {
+                        drawThumb(dc, m, mine ? x1 : x0, mine, y + headH + GAP_HEAD + (b[5] as Number) + 8);
+                    }
                 }
                 y += h;
             }
@@ -179,6 +190,71 @@ class ChatView extends WatchUi.View {
         dc.setColor(0x4FA3E0, Graphics.COLOR_TRANSPARENT);
         var name = Graphics.fitTextToArea(title, Graphics.FONT_XTINY, w * 0.5, dc.getFontHeight(Graphics.FONT_XTINY), true);
         dc.drawText(w / 2, top - 8 - dc.getFontHeight(Graphics.FONT_XTINY), Graphics.FONT_XTINY, name == null ? "" : name, Graphics.TEXT_JUSTIFY_CENTER);
+    }
+
+    //! Vorschaubild unter dem Text; solange es lädt, ein grauer Platzhalter
+    private function drawThumb(dc as Graphics.Dc, m as Dictionary, x as Number, mine as Boolean, y as Number) as Void {
+        var bmp = _thumbs.get(m.get("id"));
+        var bw = THUMB;
+        var bh = (THUMB * 3) / 4;
+        if (bmp != null) {
+            bw = bmp.getWidth();
+            bh = bmp.getHeight();
+        }
+        var left = mine ? x - bw : x;
+        if (bmp != null) {
+            dc.drawBitmap(left, y, bmp);
+        } else {
+            dc.setColor(0x333333, Graphics.COLOR_TRANSPARENT);
+            dc.fillRoundedRectangle(left, y, bw, bh, 10);
+        }
+        if (m.get("vid") != null) {
+            var r = 22;
+            var cx = left + bw / 2;
+            var cy = y + bh / 2;
+            dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
+            dc.fillCircle(cx, cy, r);
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+            dc.fillPolygon([[cx - 7, cy - 11], [cx - 7, cy + 11], [cx + 11, cy]]);
+        }
+    }
+
+    //! Vorschaubilder nacheinander laden (die Uhr verträgt nur wenige gleichzeitige Anfragen)
+    private function loadThumbs() as Void {
+        if (_queue.size() > 0) {
+            return; // lädt noch, eine Anfrage nach der anderen
+        }
+        var list = msgs as Array<Dictionary>;
+        for (var i = list.size() - 1; i >= 0; i--) {
+            if (list[i].get("u") instanceof String && _thumbs.get(list[i].get("id")) == null) {
+                _queue.add(list[i]);
+            }
+        }
+        nextThumb();
+    }
+
+    private function nextThumb() as Void {
+        if (_queue.size() == 0) {
+            return;
+        }
+        var m = _queue[0];
+        Communications.makeImageRequest(Api.server() + (m.get("u") as String) + "&w=" + THUMB.toString(), null, {
+            :maxWidth => THUMB,
+            :maxHeight => THUMB
+        }, method(:onThumb));
+    }
+
+    public function onThumb(code as Number, data as WatchUi.BitmapResource or Graphics.BitmapReference or Null) as Void {
+        if (_queue.size() == 0) {
+            return;
+        }
+        var m = _queue[0];
+        _queue = _queue.slice(1, null);
+        if (code == 200 && data != null) {
+            _thumbs.put(m.get("id"), data);
+            WatchUi.requestUpdate();
+        }
+        nextThumb();
     }
 
     //! Nachrichten mit Foto/Video, neueste zuerst (höchstens 3, fürs Antwortmenü)
