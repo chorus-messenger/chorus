@@ -813,8 +813,36 @@ app.get('/api/w/chat', watchLimit(120), async (req) => {
     if (w.img !== undefined) w.u = `/api/w/media?p=${encodeURIComponent(c.p.id)}&d=${encodeURIComponent(d.id)}&id=${encodeURIComponent(m.id)}&i=${w.img}&s=${mediaSig(d.hash, m.id, w.img)}`;
     return w;
   });
-  return { id: chat.id, t: plain(chat.title).slice(0, 40), group, msgs };
+  // Sprachnachrichten ohne Transkript beim Öffnen auf der Uhr automatisch transkribieren (im Hintergrund);
+  // tp = wie viele noch laufen, die Uhr fragt dann nach ein paar Sekunden erneut nach
+  let tp = 0;
+  if (c.ai?.publicSettings().features.transcribe) {
+    const todo = c.hub!.store.listMessages(chat.id, undefined, 12).filter((m) => !m.deleted && !m.transcript && m.attachments.some((a) => a.kind === 'voice' || a.kind === 'audio'));
+    tp = todo.length;
+    for (const m of todo) watchTranscribe(c, m.id);
+  }
+  return { id: chat.id, t: plain(chat.title).slice(0, 40), group, msgs, ...(tp ? { tp } : {}) };
 });
+const watchTranscribing = new Map<string, number>();
+function watchTranscribe(c: Ctx, id: string): void {
+  const key = `${c.p.id}:${id}`;
+  // Läuft schon oder ist vor Kurzem gescheitert (2 Min. Pause, damit ein Fehler nicht dauernd Credits kostet)
+  const t = watchTranscribing.get(key);
+  if (t && Date.now() - t < 120_000) return;
+  watchTranscribing.set(key, Date.now());
+  const h = c.hub!;
+  void (async () => {
+    const msg = h.store.getMessage(id);
+    if (!msg || msg.transcript) return;
+    const i = msg.attachments.findIndex((a) => a.kind === 'voice' || a.kind === 'audio');
+    if (i < 0) return;
+    const att = msg.attachments[i];
+    const text = await c.ai!.transcribe(await h.attachmentData(msg, i), att.mime, att.name);
+    h.setTranscript(msg.id, text);
+    watchTranscribing.delete(key);
+  })().catch((e: any) => app.log.warn(`[uhr] Transkribieren: ${e?.message ?? e}`));
+  if (watchTranscribing.size > 500) watchTranscribing.delete(watchTranscribing.keys().next().value!);
+}
 app.get('/api/w/replies', watchLimit(60), async (req) => {
   const c = watchAuth(req);
   const chat = watchChatOf(c, wid(req));
