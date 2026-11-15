@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import type { Chat, Message } from './types.js';
 
 /**
@@ -47,6 +47,17 @@ export function profileOfToken(token: string): string | null {
 export function matchDevice(list: WatchDevice[], token: string): WatchDevice | null {
   const h = Buffer.from(sha(token), 'hex');
   return list.find((d) => { const x = Buffer.from(d.hash, 'hex'); return x.length === h.length && timingSafeEqual(x, h); }) ?? null;
+}
+
+/** Signatur für Profilbild-Adressen der Uhr: Connect IQ kann bei Bildern keinen Authorization-Kopf
+ *  mitschicken, deshalb steht pro Chat eine Signatur in der Adresse statt des Geräte-Schlüssels.
+ *  Sie öffnet nur dieses eine Profilbild und wird mit dem Widerruf der Uhr ungültig. */
+export function avatarSig(deviceHash: string, chatId: string): string {
+  return createHmac('sha256', deviceHash).update('avatar:' + chatId).digest('base64url').slice(0, 24);
+}
+export function checkAvatarSig(deviceHash: string, chatId: string, sig: string): boolean {
+  const a = Buffer.from(avatarSig(deviceHash, chatId)); const b = Buffer.from(sig);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 // ---------- Kopplung ----------
@@ -119,7 +130,7 @@ export function watchMessage(m: Message, lang: 'de' | 'en', group: boolean): Wat
   return out;
 }
 
-export interface WatchChat { id: string; t: string; n: string; u: number; ts: number; p?: string; mine?: 1 }
+export interface WatchChat { id: string; t: string; n: string; u: number; ts: number; p?: string; mine?: 1; /** Profilbild-Adresse (relativ) */ a?: string }
 export function watchChat(c: Chat, preview: boolean): WatchChat {
   const out: WatchChat = { id: c.id, t: cut(plain(c.title) || '?', 32), n: c.network, u: c.unread, ts: Math.round(c.lastTs / 1000) };
   if (preview) out.p = cut(plain(c.draft ? '' : c.lastText), 80);
