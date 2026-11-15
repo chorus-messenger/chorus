@@ -170,7 +170,7 @@ export function watchMessage(m: Message, lang: 'de' | 'en', group: boolean): Wat
   return out;
 }
 
-export interface WatchChat { id: string; t: string; n: string; u: number; ts: number; p?: string; mine?: 1; /** Profilbild-Adresse (relativ) */ a?: string }
+export interface WatchChat { id: string; t: string; n: string; u: number; ts: number; p?: string; mine?: 1; /** Profilbild-Adresse (relativ) */ a?: string; /** Version des Profilbilds */ av?: string }
 export function watchChat(c: Chat, preview: boolean): WatchChat {
   const out: WatchChat = { id: c.id, t: cut(plain(c.title) || '?', 32), n: c.network, u: c.unread, ts: Math.round(c.lastTs / 1000) };
   if (preview) out.p = cut(plain(c.draft ? '' : c.lastText), 80);

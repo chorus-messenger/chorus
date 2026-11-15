@@ -1,5 +1,5 @@
 import { linkPreview, previewImage } from './linkpreview.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Chat, Message, OutgoingFile } from './types.js';
 import { createRequire } from 'node:module';
 import { Push } from './push.js';
@@ -731,7 +731,10 @@ app.get('/api/w/chats', watchLimit(120), async (req) => {
   const store = c.hub!.store;
   const chats = watchChats(store.listChats(), watchCfg(c));
   for (const ch of chats) {
-    if (store.avatarFileOf(ch.id)) ch.a = `/api/w/avatar?p=${encodeURIComponent(c.p.id)}&d=${encodeURIComponent(d.id)}&id=${encodeURIComponent(ch.id)}&s=${avatarSig(d.hash, ch.id)}`;
+    const f = store.avatarFileOf(ch.id);
+    // av = Version des Bildes: Die Uhr speichert Profilbilder dauerhaft und lädt nur neu, wenn sie sich ändert
+    if (f) ch.av = createHash('sha1').update(f).digest('hex').slice(0, 10);
+    if (f) ch.a = `/api/w/avatar?p=${encodeURIComponent(c.p.id)}&d=${encodeURIComponent(d.id)}&id=${encodeURIComponent(ch.id)}&s=${avatarSig(d.hash, ch.id)}`;
   }
   return { chats };
 });
