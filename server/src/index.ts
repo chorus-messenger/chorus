@@ -40,7 +40,7 @@ import { exportZip, slug } from './export.js';
 import * as totp from './totp.js';
 import { Pairings, avatarSig, checkAvatarSig, checkMediaSig, mediaSig, viewableIndex, cleanSettings, matchDevice, newToken, plain, profileOfToken, watchChats, watchMessage, type WatchDevice, type WatchMsg } from './watch.js';
 
-const VERSION = '0.6.1';
+const VERSION = '0.7.0';
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const require_ = createRequire(import.meta.url);
