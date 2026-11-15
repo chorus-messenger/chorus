@@ -750,8 +750,10 @@ app.get('/api/w/media', watchLimit(60), async (req, reply) => {
   const v = msg ? viewableIndex(msg) : null;
   if (!msg || !v || v.i !== i) return reply.code(404).send({ error: 'Kein Bild' });
   watchChatOf(c, msg.chatId);
+  // w = kleinere Vorschau für den Chatverlauf, sonst Bildschirmgröße
+  const size = Math.max(64, Math.min(454, Number(q?.w) || 454));
   const key = `${c.p.id}:${id}:${i}`;
-  let out = watchMedia.get(key);
+  let out = watchMedia.get(`${key}:${size}`);
   if (!out) {
     const att = msg.attachments[i];
     let src = att.fileId ? h.store.readThumb(att.fileId) : null;
@@ -761,9 +763,9 @@ app.get('/api/w/media', watchLimit(60), async (req, reply) => {
       src = (await thumbnail(key, v.video ? 'video' : 'image', async () => data)) ?? (v.video ? null : data);
     }
     if (!src) return reply.code(404).send({ error: 'Keine Vorschau' });
-    out = await fitJpeg(src).catch(() => undefined);
+    out = await fitJpeg(src, size).catch(() => undefined);
     if (!out) return reply.code(404).send({ error: 'Kein Bild' });
-    watchMedia.set(key, out);
+    watchMedia.set(`${key}:${size}`, out);
     if (watchMedia.size > 100) watchMedia.delete(watchMedia.keys().next().value!);
   }
   reply.header('Content-Type', 'image/jpeg');
