@@ -231,6 +231,9 @@ class ChatDelegate extends WatchUi.BehaviorDelegate {
     private var _dragY as Number? = null;
     private var _dragAt as Number = 0;
     private var _moved as Number = 0;
+    // Wo zuletzt getippt wurde: Die Uhr meldet ein Antippen teils nur als „Auswählen“ ohne Position
+    private var _touchY as Number? = null;
+    private var _touchAt as Number = 0;
 
     public function onDrag(e as WatchUi.DragEvent) as Boolean {
         var y = e.getCoordinates()[1];
@@ -238,6 +241,8 @@ class ChatDelegate extends WatchUi.BehaviorDelegate {
         if (t == WatchUi.DRAG_TYPE_START) {
             _dragY = y;
             _moved = 0;
+            _touchY = y;
+            _touchAt = System.getTimer();
         } else if (_dragY != null) {
             var dy = (_dragY as Number) - y;
             _moved += dy.abs();
@@ -282,22 +287,30 @@ class ChatDelegate extends WatchUi.BehaviorDelegate {
         if (_view.msgs == null) {
             return true;
         }
+        if (_touchY != null && System.getTimer() - _touchAt < 1500 && openPhotoAt(_touchY as Number)) {
+            _touchY = null;
+            return true;
+        }
+        _touchY = null;
         new RepliesLoader(_view).start();
         return true;
     }
 
     //! Foto/Video antippen öffnet es groß, sonst wie Auswählen (Antworten)
     public function onTap(e as WatchUi.ClickEvent) as Boolean {
-        if (dragged()) {
-            return true;
-        }
-        var m = _view.messageAt(e.getCoordinates()[1]);
+        _touchY = e.getCoordinates()[1];
+        _touchAt = System.getTimer();
+        return onSelect();
+    }
+
+    private function openPhotoAt(y as Number) as Boolean {
+        var m = _view.messageAt(y);
         if (m != null && m.get("u") instanceof String) {
             var v = new PhotoView(m.get("u") as String, m.get("vid") != null);
             WatchUi.pushView(v, new PhotoDelegate(), WatchUi.SLIDE_UP);
             return true;
         }
-        return onSelect();
+        return false;
     }
 
     public function onMenu() as Boolean {
