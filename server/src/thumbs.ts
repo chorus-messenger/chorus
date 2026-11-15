@@ -96,3 +96,8 @@ export async function thumbnail(key: string, kind: 'image' | 'video', load: () =
   }
   return p;
 }
+
+/** Quadratisches kleines JPEG (Profilbilder für die Garmin-Uhr), Mitte ausgeschnitten */
+export async function squareJpeg(data: Buffer, size = 96): Promise<Buffer> {
+  return slot(() => run(['-i', 'pipe:0', '-frames:v', '1', '-vf', `crop='min(iw,ih)':'min(iw,ih)',scale=${size}:${size}`, '-q:v', '4', '-f', 'image2', '-c:v', 'mjpeg', 'pipe:1'], data));
+}

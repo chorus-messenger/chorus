@@ -8,7 +8,7 @@ import websocket from '@fastify/websocket';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
-import { thumbnail } from './thumbs.js';
+import { squareJpeg, thumbnail } from './thumbs.js';
 import { emojiCache } from './emoji.js';
 import { reSanitizeMailHtml } from './mailtext.js';
 import fastifyStatic from '@fastify/static';
@@ -38,7 +38,7 @@ import { Planner } from './planner.js';
 import { toOggOpusTimed, toMp3, editVideo, parseVideoEdit } from './audio.js';
 import { exportZip, slug } from './export.js';
 import * as totp from './totp.js';
-import { Pairings, cleanSettings, matchDevice, newToken, plain, profileOfToken, watchChats, watchMessage, type WatchDevice } from './watch.js';
+import { Pairings, avatarSig, checkAvatarSig, cleanSettings, matchDevice, newToken, plain, profileOfToken, watchChats, watchMessage, type WatchDevice } from './watch.js';
 
 const VERSION = '0.6.1';
 const PORT = Number(process.env.PORT ?? 8080);
@@ -705,7 +705,8 @@ const pairings = new Pairings();
 const watchCfg = (c: Ctx) => cleanSettings(c.hub!.store.getSetting('watch', undefined), uiLang(c.hub!.store));
 const watchDevices = (c: Ctx) => c.hub!.store.getSetting<WatchDevice[]>('watchDevices', []);
 const watchLimit = (max: number) => ({ config: { rateLimit: { max, timeWindow: '1 minute' } } });
-function watchAuth(req: FastifyRequest): Ctx {
+function watchAuth(req: FastifyRequest): Ctx { return watchAuthDev(req).c; }
+function watchAuthDev(req: FastifyRequest): { c: Ctx; d: WatchDevice } {
   const token = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization ?? ''))?.[1] ?? '';
   const p = registry.get(profileOfToken(token));
   if (!p) throw Object.assign(new Error('Uhr nicht gekoppelt'), { statusCode: 401 });
@@ -716,7 +717,7 @@ function watchAuth(req: FastifyRequest): Ctx {
   const d = matchDevice(list, token);
   if (!d) throw Object.assign(new Error('Uhr nicht gekoppelt'), { statusCode: 401 });
   if (Date.now() - d.lastUsed > 10 * 60_000) { d.lastUsed = Date.now(); c.hub.store.setSetting('watchDevices', list); }
-  return c;
+  return { c, d };
 }
 function watchChatOf(c: Ctx, id: string): Chat {
   const chat = c.hub!.store.getChat(id);
@@ -726,8 +727,38 @@ function watchChatOf(c: Ctx, id: string): Chat {
 app.post('/api/w/pair', watchLimit(10), async () => pairings.start());
 app.get('/api/w/pair/:pair', watchLimit(40), async (req) => pairings.poll(String((req.params as any).pair ?? '')));
 app.get('/api/w/chats', watchLimit(120), async (req) => {
-  const c = watchAuth(req);
-  return { chats: watchChats(c.hub!.store.listChats(), watchCfg(c)) };
+  const { c, d } = watchAuthDev(req);
+  const store = c.hub!.store;
+  const chats = watchChats(store.listChats(), watchCfg(c));
+  for (const ch of chats) {
+    if (store.avatarFileOf(ch.id)) ch.a = `/api/w/avatar?p=${encodeURIComponent(c.p.id)}&d=${encodeURIComponent(d.id)}&id=${encodeURIComponent(ch.id)}&s=${avatarSig(d.hash, ch.id)}`;
+  }
+  return { chats };
+});
+// Profilbilder für die Chatliste der Uhr: klein, quadratisch, JPEG (das Handy rechnet sie für die Uhr um)
+const watchAvatars = new Map<string, Buffer>();
+app.get('/api/w/avatar', watchLimit(200), async (req, reply) => {
+  const q = req.query as any;
+  const p = registry.get(String(q?.p ?? ''));
+  const c = p ? ctxOf(p) : null;
+  if (!c || !c.vault.unlocked || !c.hub) return reply.code(404).send({ error: 'Kein Bild' });
+  const d = watchDevices(c).find((x) => x.id === String(q?.d ?? ''));
+  const id = String(q?.id ?? '');
+  if (!d || !checkAvatarSig(d.hash, id, String(q?.s ?? ''))) return reply.code(404).send({ error: 'Kein Bild' });
+  const f = c.hub.store.avatarFileOf(id);
+  const key = `${c.p.id}:${f}`;
+  let out = watchAvatars.get(key);
+  if (!out) {
+    const data = f ? c.hub.store.readFile(f) : null;
+    if (!data) return reply.code(404).send({ error: 'Kein Bild' });
+    out = await squareJpeg(data).catch(() => undefined);
+    if (!out) return reply.code(404).send({ error: 'Kein Bild' });
+    watchAvatars.set(key, out);
+    if (watchAvatars.size > 300) watchAvatars.delete(watchAvatars.keys().next().value!);
+  }
+  reply.header('Content-Type', 'image/jpeg');
+  reply.header('Cache-Control', 'private, max-age=86400');
+  return reply.send(out);
 });
 // Chat-IDs stehen im Query bzw. im JSON-Körper statt im Pfad: Connect IQ kodiert Pfade nicht (Signal-Gruppen-IDs enthalten / + =)
 const wid = (req: FastifyRequest) => String((req.query as any)?.id ?? (req.body as any)?.id ?? '');
