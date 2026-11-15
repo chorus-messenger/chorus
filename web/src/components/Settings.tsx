@@ -17,6 +17,7 @@ import { BubbleSection } from './BubbleSettings';
 import { AdminSection } from './AdminSection';
 import { StatsPage } from './Stats';
 import { PushSection } from './PushSection';
+import { WatchSection } from './WatchSettings';
 import { Avatar } from './Rail';
 import { loadAccent } from '../bubbles';
 import { useExit } from '../useExit';
@@ -26,10 +27,10 @@ const STATE_TEXT: Record<Account['status']['state'], string> = {
   connected: T('Verbunden'), connecting: T('Verbinde …'), disconnected: T('Getrennt'), need_input: T('Anmeldung offen'), qr: T('QR-Code scannen'), error: T('Fehler'),
 };
 
-type Page = 'me' | 'stats' | 'accounts' | 'lang' | 'ai' | 'push' | 'look' | 'backup' | 'storage' | 'security' | 'profiles' | 'server' | 'about' | `acc:${string}` | `conn:${ConnKind}`;
+type Page = 'me' | 'stats' | 'accounts' | 'lang' | 'ai' | 'push' | 'watch' | 'look' | 'backup' | 'storage' | 'security' | 'profiles' | 'server' | 'about' | `acc:${string}` | `conn:${ConnKind}`;
 
 const TITLES: Record<string, string> = {
-  me: T('Mein Profil'), stats: T('Statistik'), accounts: T('Messenger'), lang: T('Sprache'), ai: T('KI-Assistent'), push: T('Benachrichtigungen'), look: T('Darstellung'), backup: T('Sicherung'), storage: T('Verbindungen'),
+  me: T('Mein Profil'), stats: T('Statistik'), accounts: T('Messenger'), lang: T('Sprache'), ai: T('KI-Assistent'), push: T('Benachrichtigungen'), watch: T('Garmin-Uhr'), look: T('Darstellung'), backup: T('Sicherung'), storage: T('Verbindungen'),
   security: T('Sicherheit'), profiles: T('Profile'), server: T('Server'), about: T('Über Chorus'),
 };
 
@@ -136,6 +137,7 @@ export function Settings({ server, accounts, onClose, onAdd, onLocked, onProfile
       case 'ai': return <AiSettingsSection />;
       case 'stats': return <StatsPage name={me.name} onOpenChat={onOpenChat} />;
       case 'push': return <div className="ios-card pad"><PushSection /></div>;
+      case 'watch': return <WatchSection />;
       case 'look': return <BubbleSection nets={[...new Set(accounts.map((a) => a.network))]} />;
       case 'backup': return <div className="ios-card pad"><BackupSection /></div>;
       case 'storage': return <ConnectionsList onOpen={(k) => go(`conn:${k}`)} />;
@@ -205,6 +207,7 @@ export function Settings({ server, accounts, onClose, onAdd, onLocked, onProfile
             <div className="ios-card">
               <Row tile={<Tile color="#af52de" icon="sparkle" />} title={T('KI-Assistent')} onClick={() => go('ai')} />
               <Row tile={<Tile color="#ff3b30" icon="bell" />} title={T('Benachrichtigungen')} value={pushOn ? T('Push an') : undefined} onClick={() => go('push')} />
+              <Row tile={<Tile color="#1c1c1e" icon="timer" />} title={T('Garmin-Uhr')} sub={T('Chats lesen und antworten')} onClick={() => go('watch')} />
               <Row tile={<Tile color="#5856d6" icon="globe" />} title={T('Sprache')} value={LANGS.find((l) => l.id === lang)?.name} onClick={() => go('lang')} />
               <Row tile={<Tile color="#007aff" icon="palette" />} title={T('Darstellung')} value={bubbleMode} onClick={() => go('look')} />
             </div>

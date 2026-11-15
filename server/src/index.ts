@@ -38,6 +38,7 @@ import { Planner } from './planner.js';
 import { toOggOpusTimed, toMp3, editVideo, parseVideoEdit } from './audio.js';
 import { exportZip, slug } from './export.js';
 import * as totp from './totp.js';
+import { Pairings, cleanSettings, matchDevice, newToken, plain, profileOfToken, watchChats, watchMessage, type WatchDevice } from './watch.js';
 
 const VERSION = '0.6.1';
 const PORT = Number(process.env.PORT ?? 8080);
@@ -310,7 +311,9 @@ app.addHook('preHandler', async (req, reply) => {
   if (!url.startsWith('/api/') || url === '/api/state' || (req.method === 'GET' && /^\/api\/profiles\/[^/]+\/avatar$/.test(url)) || url.startsWith('/api/vault/setup') || url.startsWith('/api/vault/unlock') || url.startsWith('/api/vault/recover') || url === '/api/logout'
     // WebSocket prüft selbst und schließt mit 4401: so merkt die App nach einem Server-Neustart, dass sie sich neu anmelden muss,
     // statt bei einem 401 vor dem Verbindungsaufbau endlos alle 15 s neu zu verbinden (und solange keine Live-Nachrichten zu bekommen)
-    || url === '/api/ws') return;
+    || url === '/api/ws'
+    // Garmin-Uhr: eigener Geräte-Schlüssel statt Cookie (prüft watchAuth)
+    || url.startsWith('/api/w/')) return;
   if (!authed(req)) return reply.code(401).send({ error: 'Nicht angemeldet' });
 });
 
@@ -695,6 +698,112 @@ app.post('/api/chats/:id/ai/quick', async (req) => {
   const id = (req.params as any).id;
   needAi(req, id);
   return A(req).quick(id);
+});
+// ---------- Garmin-Uhr (Connect IQ) ----------
+// Die Uhr meldet sich mit einem eigenen Geräte-Schlüssel an (Authorization: Bearer …), siehe watch.ts.
+const pairings = new Pairings();
+const watchCfg = (c: Ctx) => cleanSettings(c.hub!.store.getSetting('watch', undefined), uiLang(c.hub!.store));
+const watchDevices = (c: Ctx) => c.hub!.store.getSetting<WatchDevice[]>('watchDevices', []);
+const watchLimit = (max: number) => ({ config: { rateLimit: { max, timeWindow: '1 minute' } } });
+function watchAuth(req: FastifyRequest): Ctx {
+  const token = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization ?? ''))?.[1] ?? '';
+  const p = registry.get(profileOfToken(token));
+  if (!p) throw Object.assign(new Error('Uhr nicht gekoppelt'), { statusCode: 401 });
+  const c = ctxOf(p);
+  // Tresor-Modus nach Neustart: erst in Chorus entsperren, vorher gibt es nichts zu lesen
+  if (!c.vault.unlocked || !c.hub) throw Object.assign(new Error('Chorus ist gesperrt. Bitte einmal am Handy öffnen.'), { statusCode: 423 });
+  const list = watchDevices(c);
+  const d = matchDevice(list, token);
+  if (!d) throw Object.assign(new Error('Uhr nicht gekoppelt'), { statusCode: 401 });
+  if (Date.now() - d.lastUsed > 10 * 60_000) { d.lastUsed = Date.now(); c.hub.store.setSetting('watchDevices', list); }
+  return c;
+}
+function watchChatOf(c: Ctx, id: string): Chat {
+  const chat = c.hub!.store.getChat(id);
+  if (!chat || chat.archived || (chat.network === 'email' && !watchCfg(c).mail)) throw Object.assign(new Error('Chat nicht gefunden'), { statusCode: 404 });
+  return chat;
+}
+app.post('/api/w/pair', watchLimit(10), async () => pairings.start());
+app.get('/api/w/pair/:pair', watchLimit(40), async (req) => pairings.poll(String((req.params as any).pair ?? '')));
+app.get('/api/w/chats', watchLimit(120), async (req) => {
+  const c = watchAuth(req);
+  return { chats: watchChats(c.hub!.store.listChats(), watchCfg(c)) };
+});
+// Chat-IDs stehen im Query bzw. im JSON-Körper statt im Pfad: Connect IQ kodiert Pfade nicht (Signal-Gruppen-IDs enthalten / + =)
+const wid = (req: FastifyRequest) => String((req.query as any)?.id ?? (req.body as any)?.id ?? '');
+app.get('/api/w/chat', watchLimit(120), async (req) => {
+  const c = watchAuth(req);
+  const chat = watchChatOf(c, wid(req));
+  const lang = uiLang(c.hub!.store);
+  const group = chat.kind !== 'direct';
+  const msgs = c.hub!.store.listMessages(chat.id, undefined, 12).filter((m) => !m.expiresAt || m.expiresAt > Date.now()).map((m) => watchMessage(m, lang, group));
+  return { id: chat.id, t: plain(chat.title).slice(0, 40), group, msgs };
+});
+app.get('/api/w/replies', watchLimit(60), async (req) => {
+  const c = watchAuth(req);
+  const chat = watchChatOf(c, wid(req));
+  let ai: string[] = [];
+  // KI nur mit Freigabe des Chats, wie in der App (Einstellungen → KI → Antwortvorschläge gilt auch hier)
+  if (chat.aiEnabled && c.ai) {
+    try { ai = (await c.ai.quick(chat.id)).suggestions.map(plain).filter(Boolean); } catch (e: any) { app.log.warn(`[uhr] KI-Vorschläge: ${e?.message ?? e}`); }
+  }
+  return { ai, fixed: watchCfg(c).replies };
+});
+app.post('/api/w/send', watchLimit(30), async (req) => {
+  const c = watchAuth(req);
+  const chat = watchChatOf(c, wid(req));
+  const text = String((req.body as any)?.text ?? '').trim().slice(0, 1000);
+  if (!text) throw Object.assign(new Error('Leere Nachricht'), { statusCode: 400 });
+  // Live-Übersetzung des Chats gilt auch von der Uhr aus
+  await sendMaybeTranslated(c.hub!, c.ai!, chat.id, text, null, true);
+  await c.hub!.markRead(chat.id).catch(() => {});
+  return { ok: true };
+});
+app.post('/api/w/read', watchLimit(60), async (req) => {
+  const c = watchAuth(req);
+  await c.hub!.markRead(watchChatOf(c, wid(req)).id);
+  return { ok: true };
+});
+app.post('/api/w/transcribe', watchLimit(20), async (req) => {
+  const c = watchAuth(req);
+  const h = c.hub!;
+  const msg = h.store.getMessage(wid(req));
+  if (!msg) throw Object.assign(new Error('Nachricht nicht gefunden'), { statusCode: 404 });
+  const chat = watchChatOf(c, msg.chatId);
+  const lang = uiLang(h.store);
+  if (msg.transcript) return watchMessage(msg, lang, chat.kind !== 'direct');
+  if (!c.ai?.publicSettings().features.transcribe) throw Object.assign(new Error(lang === 'de' ? 'Transkribieren braucht einen ElevenLabs-Schlüssel.' : 'Transcription needs an ElevenLabs key.'), { statusCode: 400 });
+  const i = msg.attachments.findIndex((a) => a.kind === 'voice' || a.kind === 'audio');
+  if (i < 0) throw Object.assign(new Error('Keine Sprachnachricht'), { statusCode: 400 });
+  const att = msg.attachments[i];
+  const text = await c.ai.transcribe(await h.attachmentData(msg, i), att.mime, att.name);
+  const m = h.setTranscript(msg.id, text) ?? { ...msg, transcript: text };
+  return watchMessage(m, lang, chat.kind !== 'direct');
+});
+// Einstellungen in Chorus (Cookie-Anmeldung)
+const watchPublic = (c: Ctx) => ({ settings: watchCfg(c), devices: watchDevices(c).map(({ id, name, createdAt, lastUsed }) => ({ id, name, createdAt, lastUsed })) });
+app.get('/api/watch', async (req) => watchPublic(C(req)));
+app.put('/api/watch/settings', async (req) => {
+  const c = C(req);
+  c.hub!.store.setSetting('watch', cleanSettings(req.body as any, uiLang(c.hub!.store)));
+  return watchPublic(c);
+});
+app.post('/api/watch/link', strict, async (req) => {
+  const c = C(req);
+  const code = String((req.body as any)?.code ?? '');
+  const name = String((req.body as any)?.name ?? '').trim().slice(0, 40) || 'Garmin';
+  const list = watchDevices(c);
+  if (list.length >= 10) throw Object.assign(new Error('Höchstens 10 Uhren. Bitte erst eine entfernen.'), { statusCode: 400 });
+  const { token, hash } = newToken(c.p.id);
+  if (!pairings.approve(code, token)) throw Object.assign(new Error('Code ungültig oder abgelaufen. Auf der Uhr einen neuen holen.'), { statusCode: 400 });
+  list.push({ id: randomBytes(6).toString('hex'), name, hash, createdAt: Date.now(), lastUsed: 0 });
+  c.hub!.store.setSetting('watchDevices', list);
+  return watchPublic(c);
+});
+app.delete('/api/watch/devices/:id', async (req) => {
+  const c = C(req);
+  c.hub!.store.setSetting('watchDevices', watchDevices(c).filter((d) => d.id !== (req.params as any).id));
+  return watchPublic(c);
 });
 // ---------- Geplant: zeitversetzt senden, Erinnerungen ----------
 const P = (req: FastifyRequest) => { const p = C(req).planner; if (!p) throw Object.assign(new Error('Nicht bereit'), { statusCode: 503 }); return p; };
