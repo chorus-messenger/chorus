@@ -102,8 +102,30 @@ export class Pairings {
 // ---------- Texte für die Uhr ----------
 // Die Systemschriften der Uhr kennen keine Emojis (sie erscheinen als Kästchen): weg damit, Anhänge in Worten.
 const EMOJI = /(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|[\u{1F3FB}-\u{1F3FF}‍️⃣])+/gu;
+/** Häufige Emojis als Text-Smileys: Die Schriften der Uhr haben keine Emojis, ohne Ersatz fehlte sonst die halbe Aussage */
+const SMILEYS: [string, string][] = [
+  ['😂', ":'D"], ['🤣', ":'D"], ['😹', ":'D"], ['😀', ':D'], ['😃', ':D'], ['😄', ':D'], ['😁', ':D'], ['😆', 'xD'], ['😅', '^^\''],
+  ['🙂', ':)'], ['😊', ':)'], ['☺', ':)'], ['😉', ';)'], ['😜', ';P'], ['😛', ':P'], ['😝', 'xP'], ['😋', ':P'],
+  ['😍', '*_*'], ['🥰', '<3'], ['😘', ':*'], ['😗', ':*'], ['😚', ':*'], ['😙', ':*'],
+  ['😢', ":'("], ['😭', ":'("], ['😞', ':('], ['😔', ':('], ['🙁', ':('], ['☹', ':('], ['😟', ':('], ['🥺', ':('],
+  ['😮', ':O'], ['😯', ':O'], ['😲', ':O'], ['😱', ':O'], ['😳', 'O_O'], ['🤯', ':O'],
+  ['😐', ':|'], ['😑', '-_-'], ['🙄', '-_-'], ['😒', ':/'], ['😕', ':/'], ['🤔', 'hmm'], ['😬', ':S'],
+  ['😠', '>:('], ['😡', '>:('], ['🤬', '>:('], ['😎', 'B)'], ['😇', 'O:)'], ['🤗', '(Umarmung)'], ['😴', 'zzz'], ['🥳', '\\o/'], ['🙈', '(Affe)'],
+  ['❤', '<3'], ['♥', '<3'], ['💕', '<3'], ['💖', '<3'], ['💗', '<3'], ['💙', '<3'], ['💚', '<3'], ['💛', '<3'], ['🧡', '<3'], ['💜', '<3'], ['🖤', '<3'], ['🤍', '<3'], ['😻', '<3'], ['💔', '</3'],
+  ['👍', '(y)'], ['👎', '(n)'], ['👌', '(ok)'], ['👏', '(Applaus)'], ['🙏', '(danke)'], ['💪', '(stark)'], ['✌', '(peace)'], ['👋', '(winkt)'], ['🤞', '(Daumen drücken)'],
+  ['🎉', '(Party)'], ['🥂', '(Prost)'], ['🍻', '(Prost)'], ['🎂', '(Torte)'], ['🎁', '(Geschenk)'], ['🔥', '(Feuer)'], ['⭐', '*'], ['✨', '*'], ['💯', '(100)'],
+  ['✅', '(ok)'], ['✔', '(ok)'], ['❌', '(x)'], ['❗', '!'], ['❓', '?'],
+];
+const SKIN_ZWJ = /[\u{1F3FB}-\u{1F3FF}\uFE0F\u200D]/gu;
+function smileys(s: string): string {
+  if (s.search(EMOJI) < 0) return s;
+  let out = s;
+  for (const [e, t] of SMILEYS) if (out.includes(e)) out = out.split(e).join(` ${t} `);
+  return out.replace(SKIN_ZWJ, (m) => (m === '\u200D' ? ' ' : ''));
+}
+
 export function plain(s: string): string {
-  return s.replace(EMOJI, ' ').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return smileys(s).replace(EMOJI, ' ').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 

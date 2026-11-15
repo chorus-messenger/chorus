@@ -23,8 +23,9 @@ test('Uhr: Kopplung gibt den Schlüssel genau einmal heraus', () => {
   assert.equal(p.poll(pair).state, 'gone');
 });
 
-test('Uhr: Texte ohne Emojis, Anhänge in Worten, Transkript dabei', () => {
-  assert.equal(plain('Hallo 👋🏽 du 🇩🇪!'), 'Hallo du !');
+test('Uhr: Emojis als Smileys oder weg, Anhänge in Worten, Transkript dabei', () => {
+  assert.equal(plain('Hallo 👋🏽 du 🇩🇪!'), 'Hallo (winkt) du !');
+  assert.equal(plain('Haha 😂 danke ❤️ 🦄'), "Haha :'D danke <3");
   const m: any = { id: 'm', chatId: 'c', fromMe: false, senderName: 'Anna 🌸', ts: 1000, text: '', deleted: false, transcript: 'Bin gleich da', attachments: [{ kind: 'voice', mime: 'audio/ogg', name: 'a.ogg' }] };
   assert.deepEqual(watchMessage(m, 'de', true), { id: 'm', me: false, from: 'Anna', ts: 1, text: '[Sprachnachricht] „Bin gleich da“', voice: 1, tr: 1 });
   assert.equal(watchMessage({ ...m, deleted: true }, 'en', false).text, '[Message deleted]');
