@@ -8,7 +8,7 @@ import websocket from '@fastify/websocket';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
-import { squareJpeg, thumbnail } from './thumbs.js';
+import { fitJpeg, squareJpeg, thumbnail } from './thumbs.js';
 import { emojiCache } from './emoji.js';
 import { reSanitizeMailHtml } from './mailtext.js';
 import fastifyStatic from '@fastify/static';
@@ -38,7 +38,7 @@ import { Planner } from './planner.js';
 import { toOggOpusTimed, toMp3, editVideo, parseVideoEdit } from './audio.js';
 import { exportZip, slug } from './export.js';
 import * as totp from './totp.js';
-import { Pairings, avatarSig, checkAvatarSig, cleanSettings, matchDevice, newToken, plain, profileOfToken, watchChats, watchMessage, type WatchDevice } from './watch.js';
+import { Pairings, avatarSig, checkAvatarSig, checkMediaSig, mediaSig, viewableIndex, cleanSettings, matchDevice, newToken, plain, profileOfToken, watchChats, watchMessage, type WatchDevice, type WatchMsg } from './watch.js';
 
 const VERSION = '0.6.1';
 const PORT = Number(process.env.PORT ?? 8080);
@@ -735,6 +735,41 @@ app.get('/api/w/chats', watchLimit(120), async (req) => {
   }
   return { chats };
 });
+// Fotos und Video-Standbilder für die Uhr, auf Bildschirmgröße verkleinert
+const watchMedia = new Map<string, Buffer>();
+app.get('/api/w/media', watchLimit(60), async (req, reply) => {
+  const q = req.query as any;
+  const p = registry.get(String(q?.p ?? ''));
+  const c = p ? ctxOf(p) : null;
+  if (!c || !c.vault.unlocked || !c.hub) return reply.code(404).send({ error: 'Kein Bild' });
+  const d = watchDevices(c).find((x) => x.id === String(q?.d ?? ''));
+  const id = String(q?.id ?? ''); const i = Number(q?.i ?? -1);
+  if (!d || !Number.isInteger(i) || !checkMediaSig(d.hash, id, i, String(q?.s ?? ''))) return reply.code(404).send({ error: 'Kein Bild' });
+  const h = c.hub;
+  const msg = h.store.getMessage(id);
+  const v = msg ? viewableIndex(msg) : null;
+  if (!msg || !v || v.i !== i) return reply.code(404).send({ error: 'Kein Bild' });
+  watchChatOf(c, msg.chatId);
+  const key = `${c.p.id}:${id}:${i}`;
+  let out = watchMedia.get(key);
+  if (!out) {
+    const att = msg.attachments[i];
+    let src = att.fileId ? h.store.readThumb(att.fileId) : null;
+    if (!src) {
+      const data = await h.attachmentData(msg, i).catch(() => null);
+      if (!data) return reply.code(502).send({ error: 'Anhang nicht abrufbar' });
+      src = (await thumbnail(key, v.video ? 'video' : 'image', async () => data)) ?? (v.video ? null : data);
+    }
+    if (!src) return reply.code(404).send({ error: 'Keine Vorschau' });
+    out = await fitJpeg(src).catch(() => undefined);
+    if (!out) return reply.code(404).send({ error: 'Kein Bild' });
+    watchMedia.set(key, out);
+    if (watchMedia.size > 100) watchMedia.delete(watchMedia.keys().next().value!);
+  }
+  reply.header('Content-Type', 'image/jpeg');
+  reply.header('Cache-Control', 'private, max-age=86400');
+  return reply.send(out);
+});
 // Profilbilder für die Chatliste der Uhr: klein, quadratisch, JPEG (das Handy rechnet sie für die Uhr um)
 const watchAvatars = new Map<string, Buffer>();
 app.get('/api/w/avatar', watchLimit(200), async (req, reply) => {
@@ -763,11 +798,16 @@ app.get('/api/w/avatar', watchLimit(200), async (req, reply) => {
 // Chat-IDs stehen im Query bzw. im JSON-Körper statt im Pfad: Connect IQ kodiert Pfade nicht (Signal-Gruppen-IDs enthalten / + =)
 const wid = (req: FastifyRequest) => String((req.query as any)?.id ?? (req.body as any)?.id ?? '');
 app.get('/api/w/chat', watchLimit(120), async (req) => {
-  const c = watchAuth(req);
+  const { c, d } = watchAuthDev(req);
   const chat = watchChatOf(c, wid(req));
   const lang = uiLang(c.hub!.store);
   const group = chat.kind !== 'direct';
-  const msgs = c.hub!.store.listMessages(chat.id, undefined, 12).filter((m) => !m.expiresAt || m.expiresAt > Date.now()).map((m) => watchMessage(m, lang, group));
+  const msgs = c.hub!.store.listMessages(chat.id, undefined, 12).filter((m) => !m.expiresAt || m.expiresAt > Date.now()).map((m) => {
+    const w: WatchMsg & { u?: string } = watchMessage(m, lang, group);
+    // Bild-Adresse mit Signatur statt Schlüssel (Bildanfragen der Uhr können keinen Authorization-Kopf)
+    if (w.img !== undefined) w.u = `/api/w/media?p=${encodeURIComponent(c.p.id)}&d=${encodeURIComponent(d.id)}&id=${encodeURIComponent(m.id)}&i=${w.img}&s=${mediaSig(d.hash, m.id, w.img)}`;
+    return w;
+  });
   return { id: chat.id, t: plain(chat.title).slice(0, 40), group, msgs };
 });
 app.get('/api/w/replies', watchLimit(60), async (req) => {
