@@ -20,10 +20,15 @@
 
 main() {
   set -euo pipefail
-  local DIR BRANCH IMAGE SERVICE FORCE=0
+  local DIR BRANCH IMAGE SERVICE FORCE=0 CAND
   DIR="${CHORUS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
   BRANCH="${CHORUS_BRANCH:-main}"
-  IMAGE="${CHORUS_IMAGE:-ghcr.io/robinvonmises/chorus}"
+  # Das Repo ist von robinvonmises nach chorus-messenger umgezogen. Ohne CHORUS_IMAGE werden beide
+  # Image-Namen probiert (neuer zuerst) und das geholte Image unter beiden Namen als :latest markiert,
+  # damit docker-compose.yml mit altem oder neuem Namen startet.
+  local -a IMAGES
+  if [ -n "${CHORUS_IMAGE:-}" ]; then IMAGES=("$CHORUS_IMAGE"); else IMAGES=(ghcr.io/chorus-messenger/chorus ghcr.io/robinvonmises/chorus); fi
+  IMAGE="${IMAGES[0]}"
   SERVICE="${CHORUS_SERVICE:-chorus}"
   [ "${1:-}" = "--force" ] && FORCE=1
   cd "$DIR"
@@ -44,10 +49,15 @@ main() {
   fi
 
   # Auf x86-Servern zuerst das schnell gebaute amd64-Image nehmen, sonst das Multi-Arch-Image
-  local TAG="sha-$SHORT"
-  if [ "$(uname -m)" = x86_64 ] && docker pull -q "$IMAGE:sha-$SHORT-amd64" >/dev/null 2>&1; then
-    TAG="sha-$SHORT-amd64"
-  elif ! docker pull -q "$IMAGE:sha-$SHORT" >/dev/null 2>&1; then
+  local TAG=""
+  for CAND in "${IMAGES[@]}"; do
+    if [ "$(uname -m)" = x86_64 ] && docker pull -q "$CAND:sha-$SHORT-amd64" >/dev/null 2>&1; then
+      TAG="sha-$SHORT-amd64"; IMAGE="$CAND"; break
+    elif docker pull -q "$CAND:sha-$SHORT" >/dev/null 2>&1; then
+      TAG="sha-$SHORT"; IMAGE="$CAND"; break
+    fi
+  done
+  if [ -z "$TAG" ]; then
     [ "$(cat "$WAIT_MARK" 2>/dev/null)" = "$NEW" ] && return 0   # nur einmal ins Protokoll schreiben
     echo "$NEW" > "$WAIT_MARK"
     log "Image für $SHORT gibt es (noch) nicht – GitHub baut vermutlich noch oder der Build ist fehlgeschlagen. Alter Stand bleibt, nächster Versuch beim nächsten Lauf."
@@ -63,7 +73,7 @@ main() {
 
   save_logs "$SERVICE" "${OLD:0:7}"
   git reset -q --hard "$NEW"
-  docker tag "$IMAGE:$TAG" "$IMAGE:latest"
+  for CAND in "${IMAGES[@]}"; do docker tag "$IMAGE:$TAG" "$CAND:latest"; done
 
   if docker compose up -d --no-build "$SERVICE" && wait_healthy "$SERVICE"; then
     log "Chorus läuft jetzt auf $SHORT"
@@ -81,7 +91,7 @@ main() {
   save_logs "$SERVICE" "$SHORT-fehlgeschlagen"
   git reset -q --hard "$OLD"
   if [ -n "$PREV_IMG" ]; then
-    docker tag "$IMAGE:vorher" "$IMAGE:latest"
+    for CAND in "${IMAGES[@]}"; do docker tag "$IMAGE:vorher" "$CAND:latest"; done
     docker compose up -d --no-build "$SERVICE" || true
   fi
   return 1
