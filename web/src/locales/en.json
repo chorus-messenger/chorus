@@ -1160,5 +1160,8 @@
  "Uhr entfernt. Sie kommt nicht mehr an deine Nachrichten.": "Watch removed. It can no longer access your messages.",
  "Uhr koppeln": "Pair watch",
  "Vorschau in der Chatliste": "Preview in chat list",
- "Zuletzt aktiv: {0}": "Last active: {0}"
+ "Zuletzt aktiv: {0}": "Last active: {0}",
+ "Reaktionen": "Reactions",
+ "Tippen zum Entfernen": "Tap to remove",
+ "Wer hat reagiert?": "Who reacted?"
 }

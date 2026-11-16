@@ -20,6 +20,7 @@ import { useExit } from '../useExit';
 import { useAi } from '../aiState';
 import { ContactSheet } from './ContactSheet';
 import { MessageInfo } from './MessageInfo';
+import { ReactionSheet } from './ReactionSheet';
 import { ForwardSheet } from './ForwardSheet';
 import { outbox, useOutbox, type Outgoing } from '../outbox';
 import { rise, takeRise } from '../sendAnim';
@@ -294,6 +295,8 @@ export function ChatView({ chat, account, messages, onBack, loadOlder, onPatchCh
 
   // Blase gewischt: rechts = antworten (Tastatur gleich in der Geste öffnen, sonst lässt iOS sie zu), links = Infos
   const [infoFor, setInfoFor] = useState<Message | null>(null);
+  const [reactFor, setReactFor] = useState<string[] | null>(null);
+  const showReactions = useCallback((ms: Message[]) => setReactFor(ms.map((x) => x.id)), []);
   const swipe = useCallback((m: Message, dir: 'reply' | 'info') => {
     if (dir === 'info') { setInfoFor(m); return; }
     setReplyTo(m); setEditing(null);
@@ -384,7 +387,7 @@ export function ChatView({ chat, account, messages, onBack, loadOlder, onPatchCh
             {day && <div className="day"><span>{day}</span></div>}
             <MessageBubble m={m} album={album} group={group} showName={showName} senderAvatar={group && !m.fromMe ? senderAv[m.senderId] ?? null : undefined} replied={m.replyToRemoteId ? byRemote.get(m.replyToRemoteId) ?? null : undefined}
               reminder={reminders.get(m.id)} trLang={tr?.langName ? adjLang(tr.langName) : null}
-              onAction={openMenu} onReact={react} onJump={jump} onSwipe={swipe}
+              onAction={openMenu} onReact={react} onJump={jump} onSwipe={swipe} onReactions={showReactions}
               onTranscribe={canTranscribe ? transcribe : undefined}
               onSummarize={ai?.features.text ? summarizeVoice : undefined}
               onDetect={ai?.features.text && ai.detectHints !== false ? detect : undefined} />
@@ -478,6 +481,7 @@ export function ChatView({ chat, account, messages, onBack, loadOlder, onPatchCh
         onClose={() => setRemindFor(null)}
         onPick={(at) => { const m = remindFor; setRemindFor(null); guard(async () => { await api.plan({ kind: 'remind', chatId: m.chatId, at, messageId: m.id, text: previewOf(m).slice(0, 200) }); flash(T('Erinnerung {0}', whenLabel(at))); }); }} />}
       {organizeFor && <OrganizeSheet m={organizeFor} chatTitle={chat.title} onClose={() => setOrganizeFor(null)} onInfo={flash} />}
+      {reactFor && messages && <ReactionSheet msgs={messages.filter((x) => reactFor.includes(x.id))} group={group} peer={chat.peer?.name ?? chat.title} peerAvatar={chat.avatar ?? null} avatars={senderAv} onReact={react} onClose={() => setReactFor(null)} />}
       {infoFor && <MessageInfo m={messages?.find((x) => x.id === infoFor.id) ?? infoFor} group={group} network={chat.network} avatars={senderAv} onClose={() => setInfoFor(null)} />}
       {forward && <ForwardSheet message={forward} onClose={() => setForward(null)} onDone={(t) => { setForward(null); flash(t); }} />}
       {toast && <div className="toast">{toast}</div>}
