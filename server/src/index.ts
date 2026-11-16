@@ -1,5 +1,5 @@
 import { linkPreview, previewImage } from './linkpreview.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Chat, Message, OutgoingFile } from './types.js';
 import { createRequire } from 'node:module';
 import { Push } from './push.js';
@@ -8,7 +8,7 @@ import websocket from '@fastify/websocket';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
-import { thumbnail } from './thumbs.js';
+import { fitJpeg, squareJpeg, thumbnail } from './thumbs.js';
 import { emojiCache } from './emoji.js';
 import { reSanitizeMailHtml } from './mailtext.js';
 import fastifyStatic from '@fastify/static';
@@ -38,8 +38,9 @@ import { Planner } from './planner.js';
 import { toOggOpusTimed, toMp3, editVideo, parseVideoEdit } from './audio.js';
 import { exportZip, slug } from './export.js';
 import * as totp from './totp.js';
+import { Pairings, avatarSig, checkAvatarSig, checkMediaSig, mediaSig, viewableIndex, cleanSettings, matchDevice, newToken, plain, profileOfToken, watchChats, watchMessage, type WatchDevice, type WatchMsg } from './watch.js';
 
-const VERSION = '0.6.1';
+const VERSION = '0.7.0';
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const require_ = createRequire(import.meta.url);
@@ -310,7 +311,9 @@ app.addHook('preHandler', async (req, reply) => {
   if (!url.startsWith('/api/') || url === '/api/state' || (req.method === 'GET' && /^\/api\/profiles\/[^/]+\/avatar$/.test(url)) || url.startsWith('/api/vault/setup') || url.startsWith('/api/vault/unlock') || url.startsWith('/api/vault/recover') || url === '/api/logout'
     // WebSocket prüft selbst und schließt mit 4401: so merkt die App nach einem Server-Neustart, dass sie sich neu anmelden muss,
     // statt bei einem 401 vor dem Verbindungsaufbau endlos alle 15 s neu zu verbinden (und solange keine Live-Nachrichten zu bekommen)
-    || url === '/api/ws') return;
+    || url === '/api/ws'
+    // Garmin-Uhr: eigener Geräte-Schlüssel statt Cookie (prüft watchAuth)
+    || url.startsWith('/api/w/')) return;
   if (!authed(req)) return reply.code(401).send({ error: 'Nicht angemeldet' });
 });
 
@@ -695,6 +698,216 @@ app.post('/api/chats/:id/ai/quick', async (req) => {
   const id = (req.params as any).id;
   needAi(req, id);
   return A(req).quick(id);
+});
+// ---------- Garmin-Uhr (Connect IQ) ----------
+// Die Uhr meldet sich mit einem eigenen Geräte-Schlüssel an (Authorization: Bearer …), siehe watch.ts.
+const pairings = new Pairings();
+const watchCfg = (c: Ctx) => cleanSettings(c.hub!.store.getSetting('watch', undefined), uiLang(c.hub!.store));
+const watchDevices = (c: Ctx) => c.hub!.store.getSetting<WatchDevice[]>('watchDevices', []);
+const watchLimit = (max: number) => ({ config: { rateLimit: { max, timeWindow: '1 minute' } } });
+function watchAuth(req: FastifyRequest): Ctx { return watchAuthDev(req).c; }
+function watchAuthDev(req: FastifyRequest): { c: Ctx; d: WatchDevice } {
+  const token = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization ?? ''))?.[1] ?? '';
+  const p = registry.get(profileOfToken(token));
+  if (!p) throw Object.assign(new Error('Uhr nicht gekoppelt'), { statusCode: 401 });
+  const c = ctxOf(p);
+  // Tresor-Modus nach Neustart: erst in Chorus entsperren, vorher gibt es nichts zu lesen
+  if (!c.vault.unlocked || !c.hub) throw Object.assign(new Error('Chorus ist gesperrt. Bitte einmal am Handy öffnen.'), { statusCode: 423 });
+  const list = watchDevices(c);
+  const d = matchDevice(list, token);
+  if (!d) throw Object.assign(new Error('Uhr nicht gekoppelt'), { statusCode: 401 });
+  if (Date.now() - d.lastUsed > 10 * 60_000) { d.lastUsed = Date.now(); c.hub.store.setSetting('watchDevices', list); }
+  return { c, d };
+}
+function watchChatOf(c: Ctx, id: string): Chat {
+  const chat = c.hub!.store.getChat(id);
+  if (!chat || chat.archived || (chat.network === 'email' && !watchCfg(c).mail)) throw Object.assign(new Error('Chat nicht gefunden'), { statusCode: 404 });
+  return chat;
+}
+app.post('/api/w/pair', watchLimit(10), async () => pairings.start());
+app.get('/api/w/pair/:pair', watchLimit(40), async (req) => pairings.poll(String((req.params as any).pair ?? '')));
+app.get('/api/w/chats', watchLimit(120), async (req) => {
+  const { c, d } = watchAuthDev(req);
+  const store = c.hub!.store;
+  const chats = watchChats(store.listChats(), watchCfg(c));
+  for (const ch of chats) {
+    const f = store.avatarFileOf(ch.id);
+    // av = Version des Bildes: Die Uhr speichert Profilbilder dauerhaft und lädt nur neu, wenn sie sich ändert
+    if (f) ch.av = createHash('sha1').update(f).digest('hex').slice(0, 10);
+    if (f) ch.a = `/api/w/avatar?p=${encodeURIComponent(c.p.id)}&d=${encodeURIComponent(d.id)}&id=${encodeURIComponent(ch.id)}&s=${avatarSig(d.hash, ch.id)}`;
+  }
+  return { chats };
+});
+// Fotos und Video-Standbilder für die Uhr, auf Bildschirmgröße verkleinert
+const watchMedia = new Map<string, Buffer>();
+app.get('/api/w/media', watchLimit(60), async (req, reply) => {
+  const q = req.query as any;
+  const p = registry.get(String(q?.p ?? ''));
+  const c = p ? ctxOf(p) : null;
+  if (!c || !c.vault.unlocked || !c.hub) return reply.code(404).send({ error: 'Kein Bild' });
+  const d = watchDevices(c).find((x) => x.id === String(q?.d ?? ''));
+  const id = String(q?.id ?? ''); const i = Number(q?.i ?? -1);
+  if (!d || !Number.isInteger(i) || !checkMediaSig(d.hash, id, i, String(q?.s ?? ''))) return reply.code(404).send({ error: 'Kein Bild' });
+  const h = c.hub;
+  const msg = h.store.getMessage(id);
+  const v = msg ? viewableIndex(msg) : null;
+  if (!msg || !v || v.i !== i) return reply.code(404).send({ error: 'Kein Bild' });
+  watchChatOf(c, msg.chatId);
+  // w = kleinere Vorschau für den Chatverlauf, sonst Bildschirmgröße
+  const size = Math.max(64, Math.min(454, Number(q?.w) || 454));
+  const key = `${c.p.id}:${id}:${i}`;
+  let out = watchMedia.get(`${key}:${size}`);
+  if (!out) {
+    const att = msg.attachments[i];
+    let src = att.fileId ? h.store.readThumb(att.fileId) : null;
+    if (!src) {
+      const data = await h.attachmentData(msg, i).catch(() => null);
+      if (!data) return reply.code(502).send({ error: 'Anhang nicht abrufbar' });
+      src = (await thumbnail(key, v.video ? 'video' : 'image', async () => data)) ?? (v.video ? null : data);
+    }
+    if (!src) return reply.code(404).send({ error: 'Keine Vorschau' });
+    out = await fitJpeg(src, size).catch(() => undefined);
+    if (!out) return reply.code(404).send({ error: 'Kein Bild' });
+    watchMedia.set(`${key}:${size}`, out);
+    if (watchMedia.size > 100) watchMedia.delete(watchMedia.keys().next().value!);
+  }
+  reply.header('Content-Type', 'image/jpeg');
+  reply.header('Cache-Control', 'private, max-age=86400');
+  return reply.send(out);
+});
+// Profilbilder für die Chatliste der Uhr: klein, quadratisch, JPEG (das Handy rechnet sie für die Uhr um)
+const watchAvatars = new Map<string, Buffer>();
+app.get('/api/w/avatar', watchLimit(200), async (req, reply) => {
+  const q = req.query as any;
+  const p = registry.get(String(q?.p ?? ''));
+  const c = p ? ctxOf(p) : null;
+  if (!c || !c.vault.unlocked || !c.hub) return reply.code(404).send({ error: 'Kein Bild' });
+  const d = watchDevices(c).find((x) => x.id === String(q?.d ?? ''));
+  const id = String(q?.id ?? '');
+  if (!d || !checkAvatarSig(d.hash, id, String(q?.s ?? ''))) return reply.code(404).send({ error: 'Kein Bild' });
+  const f = c.hub.store.avatarFileOf(id);
+  const key = `${c.p.id}:${f}`;
+  let out = watchAvatars.get(key);
+  if (!out) {
+    const data = f ? c.hub.store.readFile(f) : null;
+    if (!data) return reply.code(404).send({ error: 'Kein Bild' });
+    out = await squareJpeg(data).catch(() => undefined);
+    if (!out) return reply.code(404).send({ error: 'Kein Bild' });
+    watchAvatars.set(key, out);
+    if (watchAvatars.size > 300) watchAvatars.delete(watchAvatars.keys().next().value!);
+  }
+  reply.header('Content-Type', 'image/jpeg');
+  reply.header('Cache-Control', 'private, max-age=86400');
+  return reply.send(out);
+});
+// Chat-IDs stehen im Query bzw. im JSON-Körper statt im Pfad: Connect IQ kodiert Pfade nicht (Signal-Gruppen-IDs enthalten / + =)
+const wid = (req: FastifyRequest) => String((req.query as any)?.id ?? (req.body as any)?.id ?? '');
+app.get('/api/w/chat', watchLimit(120), async (req) => {
+  const { c, d } = watchAuthDev(req);
+  const chat = watchChatOf(c, wid(req));
+  const lang = uiLang(c.hub!.store);
+  const group = chat.kind !== 'direct';
+  const msgs = c.hub!.store.listMessages(chat.id, undefined, 12).filter((m) => !m.expiresAt || m.expiresAt > Date.now()).map((m) => {
+    const w: WatchMsg & { u?: string } = watchMessage(m, lang, group);
+    // Bild-Adresse mit Signatur statt Schlüssel (Bildanfragen der Uhr können keinen Authorization-Kopf)
+    if (w.img !== undefined) w.u = `/api/w/media?p=${encodeURIComponent(c.p.id)}&d=${encodeURIComponent(d.id)}&id=${encodeURIComponent(m.id)}&i=${w.img}&s=${mediaSig(d.hash, m.id, w.img)}`;
+    return w;
+  });
+  // Sprachnachrichten ohne Transkript beim Öffnen auf der Uhr automatisch transkribieren (im Hintergrund);
+  // tp = wie viele noch laufen, die Uhr fragt dann nach ein paar Sekunden erneut nach
+  let tp = 0;
+  if (c.ai?.publicSettings().features.transcribe) {
+    const todo = c.hub!.store.listMessages(chat.id, undefined, 12).filter((m) => !m.deleted && !m.transcript && m.attachments.some((a) => a.kind === 'voice' || a.kind === 'audio'));
+    tp = todo.length;
+    for (const m of todo) watchTranscribe(c, m.id);
+  }
+  return { id: chat.id, t: plain(chat.title).slice(0, 40), group, msgs, ...(tp ? { tp } : {}) };
+});
+const watchTranscribing = new Map<string, number>();
+function watchTranscribe(c: Ctx, id: string): void {
+  const key = `${c.p.id}:${id}`;
+  // Läuft schon oder ist vor Kurzem gescheitert (2 Min. Pause, damit ein Fehler nicht dauernd Credits kostet)
+  const t = watchTranscribing.get(key);
+  if (t && Date.now() - t < 120_000) return;
+  watchTranscribing.set(key, Date.now());
+  const h = c.hub!;
+  void (async () => {
+    const msg = h.store.getMessage(id);
+    if (!msg || msg.transcript) return;
+    const i = msg.attachments.findIndex((a) => a.kind === 'voice' || a.kind === 'audio');
+    if (i < 0) return;
+    const att = msg.attachments[i];
+    const text = await c.ai!.transcribe(await h.attachmentData(msg, i), att.mime, att.name);
+    h.setTranscript(msg.id, text);
+    watchTranscribing.delete(key);
+  })().catch((e: any) => app.log.warn(`[uhr] Transkribieren: ${e?.message ?? e}`));
+  if (watchTranscribing.size > 500) watchTranscribing.delete(watchTranscribing.keys().next().value!);
+}
+app.get('/api/w/replies', watchLimit(60), async (req) => {
+  const c = watchAuth(req);
+  const chat = watchChatOf(c, wid(req));
+  let ai: string[] = [];
+  // KI nur mit Freigabe des Chats, wie in der App (Einstellungen → KI → Antwortvorschläge gilt auch hier)
+  if (chat.aiEnabled && c.ai) {
+    try { ai = (await c.ai.quick(chat.id)).suggestions.map(plain).filter(Boolean); } catch (e: any) { app.log.warn(`[uhr] KI-Vorschläge: ${e?.message ?? e}`); }
+  }
+  return { ai, fixed: watchCfg(c).replies };
+});
+app.post('/api/w/send', watchLimit(30), async (req) => {
+  const c = watchAuth(req);
+  const chat = watchChatOf(c, wid(req));
+  const text = String((req.body as any)?.text ?? '').trim().slice(0, 1000);
+  if (!text) throw Object.assign(new Error('Leere Nachricht'), { statusCode: 400 });
+  // Live-Übersetzung des Chats gilt auch von der Uhr aus
+  await sendMaybeTranslated(c.hub!, c.ai!, chat.id, text, null, true);
+  await c.hub!.markRead(chat.id).catch(() => {});
+  return { ok: true };
+});
+app.post('/api/w/read', watchLimit(60), async (req) => {
+  const c = watchAuth(req);
+  await c.hub!.markRead(watchChatOf(c, wid(req)).id);
+  return { ok: true };
+});
+app.post('/api/w/transcribe', watchLimit(20), async (req) => {
+  const c = watchAuth(req);
+  const h = c.hub!;
+  const msg = h.store.getMessage(wid(req));
+  if (!msg) throw Object.assign(new Error('Nachricht nicht gefunden'), { statusCode: 404 });
+  const chat = watchChatOf(c, msg.chatId);
+  const lang = uiLang(h.store);
+  if (msg.transcript) return watchMessage(msg, lang, chat.kind !== 'direct');
+  if (!c.ai?.publicSettings().features.transcribe) throw Object.assign(new Error(lang === 'de' ? 'Transkribieren braucht einen ElevenLabs-Schlüssel.' : 'Transcription needs an ElevenLabs key.'), { statusCode: 400 });
+  const i = msg.attachments.findIndex((a) => a.kind === 'voice' || a.kind === 'audio');
+  if (i < 0) throw Object.assign(new Error('Keine Sprachnachricht'), { statusCode: 400 });
+  const att = msg.attachments[i];
+  const text = await c.ai.transcribe(await h.attachmentData(msg, i), att.mime, att.name);
+  const m = h.setTranscript(msg.id, text) ?? { ...msg, transcript: text };
+  return watchMessage(m, lang, chat.kind !== 'direct');
+});
+// Einstellungen in Chorus (Cookie-Anmeldung)
+const watchPublic = (c: Ctx) => ({ settings: watchCfg(c), devices: watchDevices(c).map(({ id, name, createdAt, lastUsed }) => ({ id, name, createdAt, lastUsed })) });
+app.get('/api/watch', async (req) => watchPublic(C(req)));
+app.put('/api/watch/settings', async (req) => {
+  const c = C(req);
+  c.hub!.store.setSetting('watch', cleanSettings(req.body as any, uiLang(c.hub!.store)));
+  return watchPublic(c);
+});
+app.post('/api/watch/link', strict, async (req) => {
+  const c = C(req);
+  const code = String((req.body as any)?.code ?? '');
+  const name = String((req.body as any)?.name ?? '').trim().slice(0, 40) || 'Garmin';
+  const list = watchDevices(c);
+  if (list.length >= 10) throw Object.assign(new Error('Höchstens 10 Uhren. Bitte erst eine entfernen.'), { statusCode: 400 });
+  const { token, hash } = newToken(c.p.id);
+  if (!pairings.approve(code, token)) throw Object.assign(new Error('Code ungültig oder abgelaufen. Auf der Uhr einen neuen holen.'), { statusCode: 400 });
+  list.push({ id: randomBytes(6).toString('hex'), name, hash, createdAt: Date.now(), lastUsed: 0 });
+  c.hub!.store.setSetting('watchDevices', list);
+  return watchPublic(c);
+});
+app.delete('/api/watch/devices/:id', async (req) => {
+  const c = C(req);
+  c.hub!.store.setSetting('watchDevices', watchDevices(c).filter((d) => d.id !== (req.params as any).id));
+  return watchPublic(c);
 });
 // ---------- Geplant: zeitversetzt senden, Erinnerungen ----------
 const P = (req: FastifyRequest) => { const p = C(req).planner; if (!p) throw Object.assign(new Error('Nicht bereit'), { statusCode: 503 }); return p; };

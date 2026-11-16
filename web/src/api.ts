@@ -118,6 +118,8 @@ export function serverText(m: string): string {
   const i = m.indexOf(': ');
   return i > 0 ? `${T(m.slice(0, i))}: ${m.slice(i + 2)}` : m;
 }
+export interface WatchSettings { replies: string[]; mail: boolean; preview: boolean }
+export interface WatchState { settings: WatchSettings; devices: { id: string; name: string; createdAt: number; lastUsed: number }[] }
 export class ApiError extends Error { constructor(public status: number, msg: string, public data: any = null) { super(msg); } }
 
 export interface Receipt { who: string; name: string | null; deliveredAt: number | null; readAt: number | null; playedAt: number | null }
@@ -212,6 +214,10 @@ export const api = {
   reconnect: () => req('POST', '/api/reconnect'),
   refreshContacts: () => req('POST', '/api/contacts/refresh'),
   push: () => req<{ key: string; preview: boolean; devices: number }>('GET', '/api/push'),
+  watch: () => req<WatchState>('GET', '/api/watch'),
+  watchSettings: (b: WatchSettings) => req<WatchState>('PUT', '/api/watch/settings', b),
+  watchLink: (code: string, name: string) => req<WatchState>('POST', '/api/watch/link', { code, name }),
+  watchRemove: (id: string) => req<WatchState>('DELETE', `/api/watch/devices/${encodeURIComponent(id)}`),
   pushSubscribe: (s: PushSubscription) => req('POST', '/api/push/subscribe', { subscription: s.toJSON() }),
   pushUnsubscribe: (endpoint: string) => req('POST', '/api/push/unsubscribe', { endpoint }),
   pushTest: (endpoint: string) => req('POST', '/api/push/test', { endpoint }),

@@ -96,3 +96,13 @@ export async function thumbnail(key: string, kind: 'image' | 'video', load: () =
   }
   return p;
 }
+
+/** Quadratisches kleines JPEG (Profilbilder für die Garmin-Uhr), Mitte ausgeschnitten */
+export async function squareJpeg(data: Buffer, size = 96): Promise<Buffer> {
+  return slot(() => run(['-i', 'pipe:0', '-frames:v', '1', '-vf', `crop='min(iw,ih)':'min(iw,ih)',scale=${size}:${size}`, '-q:v', '4', '-f', 'image2', '-c:v', 'mjpeg', 'pipe:1'], data));
+}
+
+/** Foto für die Garmin-Uhr: höchstens size × size, Seitenverhältnis bleibt, JPEG */
+export async function fitJpeg(data: Buffer, size = 454): Promise<Buffer> {
+  return slot(() => run(['-i', 'pipe:0', '-frames:v', '1', '-vf', `scale='min(${size},iw)':'min(${size},ih)':force_original_aspect_ratio=decrease`, '-q:v', '5', '-f', 'image2', '-c:v', 'mjpeg', 'pipe:1'], data));
+}
