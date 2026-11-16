@@ -1366,3 +1366,14 @@ html.shape-compact .fab { width: 50px; height: 50px; border-radius: 15px; }
 .key-ok .trunc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ios-card.pad > .key-saved .btn { flex: none; }
 .conn-pick > .switch { justify-self: end; }
+
+/* Reaktionsübersicht */
+.rs-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.rs-tabs::-webkit-scrollbar { display: none; }
+.rs-tabs button { flex: none; border: 0; border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 15px; background: var(--line); color: var(--ink); cursor: pointer; }
+.rs-tabs button span { font-size: 13px; color: var(--ink-2); }
+.rs-tabs button.on { background: var(--accent); color: #fff; }
+.rs-tabs button.on span { color: rgba(255,255,255,.85); }
+.rs-emoji { font-size: 22px; line-height: 1; }
+.rs-mine { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.react-sheet .mi-label small { display: block; margin-left: 0; font-size: 12px; }

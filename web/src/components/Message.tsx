@@ -31,7 +31,7 @@ export function previewOf(m: Message): string {
 /** Wischweg, ab dem eine Blase beim Loslassen auslöst */
 const SWIPE = 56;
 
-export const MessageBubble = memo(function MessageBubble({ m, album, group, showName, senderAvatar, replied, onAction, onReact, onJump, onSwipe, onTranscribe, onSummarize, onDetect, reminder, trLang }: {
+export const MessageBubble = memo(function MessageBubble({ m, album, group, showName, senderAvatar, replied, onAction, onReact, onJump, onSwipe, onReactions, onTranscribe, onSummarize, onDetect, reminder, trLang }: {
   m: Message; group: boolean; showName: boolean; replied?: Message | null;
   /** Mehrere kurz nacheinander geschickte Foto-Nachrichten desselben Absenders, als eine Blase gezeigt (m = erste) */
   album?: Message[];
@@ -47,6 +47,8 @@ export const MessageBubble = memo(function MessageBubble({ m, album, group, show
   onJump: (remoteId: string) => void;
   /** Blase gewischt: nach rechts = antworten, nach links = Infos (wann zugestellt/gelesen, von wem) */
   onSwipe?: (m: Message, dir: 'reply' | 'info') => void;
+  /** Reaktion antippen: Übersicht, wer wie reagiert hat */
+  onReactions?: (msgs: Message[]) => void;
   onTranscribe?: (m: Message) => Promise<void>;
   /** Sprachnachricht in einem Satz (transkribiert bei Bedarf vorher) */
   onSummarize?: (m: Message) => Promise<void>;
@@ -184,7 +186,7 @@ export const MessageBubble = memo(function MessageBubble({ m, album, group, show
       {groups.size > 0 && (
         <div className="reactions">
           {[...groups].map(([emoji, g]) => (
-            <button key={emoji} className={`reaction ${g.mine ? 'mine' : ''}`} onClick={() => onReact(m, g.mine ? null : emoji)} title={g.mine ? T('Reaktion entfernen') : T('Auch reagieren')}>
+            <button key={emoji} className={`reaction ${g.mine ? 'mine' : ''}`} onClick={() => onReactions ? onReactions(msgs) : onReact(m, g.mine ? null : emoji)} title={onReactions ? T('Wer hat reagiert?') : g.mine ? T('Reaktion entfernen') : T('Auch reagieren')}>
               {emoji}{g.n > 1 && <span>{g.n}</span>}
             </button>
           ))}

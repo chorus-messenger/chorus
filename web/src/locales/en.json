@@ -1141,5 +1141,8 @@
  "Für jeden CalDAV/CardDAV-Server (z. B. Radicale, Baïkal, mailbox.org). Chorus sucht Kalender und Adressbücher selbst.": "For any CalDAV/CardDAV server (e.g. Radicale, Baïkal, mailbox.org). Chorus finds calendars and address books itself.",
  "Zuerst iCloud verbinden.": "Connect iCloud first.",
  "Bitte deine iCloud-Mail-Adresse angeben (…@icloud.com).": "Please enter your iCloud mail address (…@icloud.com).",
- "Als Chats": "As chats"
+ "Als Chats": "As chats",
+ "Reaktionen": "Reactions",
+ "Tippen zum Entfernen": "Tap to remove",
+ "Wer hat reagiert?": "Who reacted?"
 }
