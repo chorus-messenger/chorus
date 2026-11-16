@@ -83,6 +83,10 @@ Nothing is sent to an AI provider unless you allow AI for that chat. You can rev
 - **Export** of your history as HTML or ZIP, automatic saving of media
 - Admin area: server health, recent warnings, reconnect messengers, restart
 
+## Garmin watch app
+
+A companion app for Garmin watches (Venu 3 / 3S) lives in its own repository: **[chorus-messenger/chorus-garmin](https://github.com/chorus-messenger/chorus-garmin)**. It shows your chats, transcribed voice messages and lets you reply with AI suggestions or quick replies. Pair it under **Settings → Garmin watch**.
+
 ## Security
 
 Chorus is built around a **vault**:
@@ -101,7 +105,7 @@ If Chorus is reachable from the internet, put it behind a reverse proxy with HTT
 You need a server with Docker.
 
 ```bash
-git clone https://github.com/robinvonmises/chorus.git && cd chorus
+git clone https://github.com/chorus-messenger/chorus.git && cd chorus
 docker compose up -d
 ```
 

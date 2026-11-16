@@ -4,7 +4,7 @@
 # oder das mitgelieferte HTTPS starten:  docker compose --profile https up -d
 services:
   chorus:
-    image: ghcr.io/robinvonmises/chorus:latest
+    image: ghcr.io/chorus-messenger/chorus:latest
     build: .
     container_name: chorus
     restart: unless-stopped

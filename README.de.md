@@ -78,6 +78,10 @@ Einrichten unter Einstellungen → KI-Assistent. Die KI ist in jedem Chat aus, b
 - **Export** des Verlaufs als HTML oder ZIP, Medien automatisch sichern
 - Verwaltung: Serverzustand, letzte Warnungen, Messenger neu verbinden, Neustart
 
+## Garmin-Uhr
+
+Eine App für Garmin-Uhren (Venu 3 / 3S) liegt in einem eigenen Repository: **[chorus-messenger/chorus-garmin](https://github.com/chorus-messenger/chorus-garmin)**. Sie zeigt deine Chats und transkribierte Sprachnachrichten, Antworten gehen per KI-Vorschlag oder Schnellantwort. Gekoppelt wird sie unter **Einstellungen → Garmin-Uhr**.
+
 ## Sicherheit: der Tresor
 
 Beim ersten Start legst du ein Passwort fest. Daraus erzeugt **dein Browser** einen Schlüssel. Damit sind alle Chats, Dateien und Zugangsdaten auf dem Server verschlüsselt (Datenbank: SQLCipher, Dateien: AES-256-GCM).
@@ -106,7 +110,7 @@ Voraussetzung: ein Server mit Docker (z. B. Ubuntu, Debian, Synology, Unraid).
 
 ```bash
 mkdir chorus && cd chorus
-curl -O https://raw.githubusercontent.com/robinvonmises/chorus/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/chorus-messenger/chorus/main/docker-compose.yml
 docker compose up -d
 ```
 
@@ -117,7 +121,7 @@ Chorus läuft dann als einfaches HTTP auf **`http://<IP-deines-Servers>:8080`**.
 **Ohne eigenen Proxy** gibt es HTTPS mit selbst erstelltem Zertifikat auf Port 8443:
 
 ```bash
-curl -O https://raw.githubusercontent.com/robinvonmises/chorus/main/Caddyfile
+curl -O https://raw.githubusercontent.com/chorus-messenger/chorus/main/Caddyfile
 docker compose --profile https up -d
 ```
 
@@ -128,7 +132,7 @@ Wer von einer älteren Version kommt und HTTPS nicht mehr braucht, entfernt den 
 Auf Debian/Ubuntu als root:
 
 ```bash
-git clone https://github.com/robinvonmises/chorus.git && cd chorus
+git clone https://github.com/chorus-messenger/chorus.git && cd chorus
 bash deploy/install-ohne-docker.sh        # erneut ausführen = Update
 ```
 
@@ -157,7 +161,7 @@ Hinweis: Ohne Komfort-Modus ist nach jedem Update alles gesperrt, bis du die App
 ### Ausprobieren ohne echte Konten
 
 ```bash
-docker run --rm -p 8080:8080 -e DEMO=1 ghcr.io/robinvonmises/chorus:latest
+docker run --rm -p 8080:8080 -e DEMO=1 ghcr.io/chorus-messenger/chorus:latest
 ```
 
 ## Messenger verbinden

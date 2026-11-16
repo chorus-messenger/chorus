@@ -1,6 +1,0 @@
-<resources>
-    <!-- Adresse des Chorus-Servers. build.sh setzt sie aus der Variable SERVER. -->
-    <properties>
-        <property id="server" type="string">https://chorus.example.org</property>
-    </properties>
-</resources>
