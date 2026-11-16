@@ -110,7 +110,7 @@ Voraussetzung: ein Server mit Docker (z. B. Ubuntu, Debian, Synology, Unraid).
 
 ```bash
 mkdir chorus && cd chorus
-curl -O https://raw.githubusercontent.com/chorus-messenger/chorus/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/chorus-messenger/chorus-web/main/docker-compose.yml
 docker compose up -d
 ```
 
@@ -121,7 +121,7 @@ Chorus läuft dann als einfaches HTTP auf **`http://<IP-deines-Servers>:8080`**.
 **Ohne eigenen Proxy** gibt es HTTPS mit selbst erstelltem Zertifikat auf Port 8443:
 
 ```bash
-curl -O https://raw.githubusercontent.com/chorus-messenger/chorus/main/Caddyfile
+curl -O https://raw.githubusercontent.com/chorus-messenger/chorus-web/main/Caddyfile
 docker compose --profile https up -d
 ```
 
@@ -132,7 +132,7 @@ Wer von einer älteren Version kommt und HTTPS nicht mehr braucht, entfernt den 
 Auf Debian/Ubuntu als root:
 
 ```bash
-git clone https://github.com/chorus-messenger/chorus.git && cd chorus
+git clone https://github.com/chorus-messenger/chorus-web.git && cd chorus-web
 bash deploy/install-ohne-docker.sh        # erneut ausführen = Update
 ```
 

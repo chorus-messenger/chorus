@@ -41,7 +41,7 @@ export class DemoAdapter implements Adapter {
       familie: [['Mama', 'Wer kommt Sonntag zum Essen?', 300], ['Mama', 'Ich mache Rouladen, wie letztes Mal 😊', 299], ['Papa', 'Ich natürlich 😄', 290],
         ['Lena', 'Bin dabei, bringe Nachtisch mit', 200], ['Lena', 'Soll ich noch jemanden vom Bahnhof abholen?', 199], ['me', 'Ich auch! Komme mit dem Zug um 11:40 an, wäre super 🙏', 120],
         ['Mama', 'Schön, dann sind wir komplett', 100], ['Mama', '❤️', 99]],
-      tom: [['Tom', 'Hast du die Unterlagen schon angeschaut?', 1500], ['Tom', 'Und das hier, falls dir langweilig ist 😄 https://youtu.be/dQw4w9WgXcQ', 1490], ['me', 'Kennst du das schon? https://github.com/chorus-messenger/chorus', 1480]],
+      tom: [['Tom', 'Hast du die Unterlagen schon angeschaut?', 1500], ['Tom', 'Und das hier, falls dir langweilig ist 😄 https://youtu.be/dQw4w9WgXcQ', 1490], ['me', 'Kennst du das schon? https://github.com/chorus-messenger/chorus-web', 1480]],
       verein: [['Jonas', 'Treffpunkt wie immer 9 Uhr am Parkplatz', 3000], ['Sarah', '👍', 2900]],
       emma: [['Emma', 'Hi! Are you still coming to London next month?', 4000], ['Emma', 'Let me know your dates, you can stay with us 😊', 3990]],
       'mail-angebot': [['Küchenstudio Berger', 'Hallo Herr von Ometzinski,\n\nanbei wie besprochen unser Angebot für die Küche.', 900], ['me', 'Danke! Ist die Arbeitsplatte in Eiche schon drin?', 800], ['Küchenstudio Berger', 'Ja, Position 4.', 700]],
