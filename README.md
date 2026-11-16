@@ -105,7 +105,7 @@ If Chorus is reachable from the internet, put it behind a reverse proxy with HTT
 You need a server with Docker.
 
 ```bash
-git clone https://github.com/chorus-messenger/chorus.git && cd chorus
+git clone https://github.com/chorus-messenger/chorus-web.git && cd chorus-web
 docker compose up -d
 ```
 
