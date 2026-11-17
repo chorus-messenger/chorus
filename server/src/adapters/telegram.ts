@@ -275,10 +275,59 @@ export class TelegramAdapter implements Adapter {
   }
 
   async react(chat: string, id: string, emoji: string | null) {
-    await this.c.invoke(new Api.messages.SendReaction({
-      peer: await this.peer(chat), msgId: Number(id),
-      reaction: emoji ? [new Api.ReactionEmoji({ emoticon: emoji })] : [],
+    const peer = await this.peer(chat);
+    const send = (e: string | null) => this.c.invoke(new Api.messages.SendReaction({
+      peer, msgId: Number(id),
+      reaction: e ? [new Api.ReactionEmoji({ emoticon: e })] : [],
     }));
+    if (!emoji) { await send(null); return; }
+    // Telegram kennt Reaktionen ohne Variation Selector (z. B. „❤“ statt „❤️“)
+    const allowed = await this.allowedReactions(chat, peer).catch(() => null);
+    const pick = matchReaction(emoji, allowed ?? undefined);
+    if (allowed && !pick) throw reactionError(emoji, allowed);
+    try {
+      await send(pick ?? emoji);
+    } catch (e: any) {
+      if (!/REACTION_INVALID/.test(String(e?.message))) throw e;
+      const alt = stripVs(emoji);
+      if (!allowed && alt !== emoji) {
+        try { await send(alt); return; } catch { /* unten verständlich melden */ }
+      }
+      throw reactionError(emoji, allowed);
+    }
+  }
+
+  private reactCache = new Map<string, { at: number; list: string[] | null }>();
+  private globalReactions: { at: number; list: string[] } | null = null;
+
+  /** Erlaubte Standard-Reaktionen des Chats (null = alle Standard-Reaktionen) */
+  private async allowedReactions(chat: string, peer: Api.TypeInputPeer): Promise<string[] | null> {
+    const hit = this.reactCache.get(chat);
+    if (hit && Date.now() - hit.at < 10 * 60_000) return hit.list;
+    let avail: Api.TypeChatReactions | undefined;
+    if (peer instanceof Api.InputPeerChannel) {
+      const f = await this.c.invoke(new Api.channels.GetFullChannel({ channel: new Api.InputChannel({ channelId: peer.channelId, accessHash: peer.accessHash }) }));
+      avail = (f.fullChat as Api.ChannelFull).availableReactions;
+    } else if (peer instanceof Api.InputPeerChat) {
+      const f = await this.c.invoke(new Api.messages.GetFullChat({ chatId: peer.chatId }));
+      avail = (f.fullChat as Api.ChatFull).availableReactions;
+    }
+    let list: string[] | null;
+    if (avail instanceof Api.ChatReactionsNone) list = [];
+    else if (avail instanceof Api.ChatReactionsSome) list = avail.reactions.flatMap((r) => r instanceof Api.ReactionEmoji ? [r.emoticon] : []);
+    else list = await this.defaultReactions();
+    this.reactCache.set(chat, { at: Date.now(), list });
+    return list;
+  }
+
+  /** Alle Standard-Reaktionen, die ohne Premium gehen */
+  private async defaultReactions(): Promise<string[] | null> {
+    if (this.globalReactions && Date.now() - this.globalReactions.at < 24 * 3600_000) return this.globalReactions.list;
+    const r = await this.c.invoke(new Api.messages.GetAvailableReactions({ hash: 0 }));
+    if (!(r instanceof Api.messages.AvailableReactions)) return this.globalReactions?.list ?? null;
+    const list = r.reactions.filter((x) => !x.inactive && !x.premium).map((x) => x.reaction);
+    this.globalReactions = { at: Date.now(), list };
+    return list;
   }
 
   async edit(chat: string, id: string, text: string) {
@@ -370,6 +419,25 @@ function mediaToAttachments(m: Api.Message): Attachment[] {
     return [{ fileId: null, name, mime: d.mimeType, size: Number(d.size.toString()), kind, durationSec, width, height, ...(gif && kind === 'video' ? { gif: true } : {}) }];
   }
   return [];
+}
+
+const stripVs = (e: string) => e.replace(/\uFE0F/g, '');
+
+/** Passende erlaubte Reaktion finden (Variation Selector ignorieren) */
+export function matchReaction(emoji: string, allowed?: string[]): string | null {
+  if (!allowed) return null;
+  if (allowed.includes(emoji)) return emoji;
+  const k = stripVs(emoji);
+  return allowed.find((a) => stripVs(a) === k) ?? null;
+}
+
+function reactionError(emoji: string, allowed: string[] | null) {
+  const msg = allowed && allowed.length === 0
+    ? 'In diesem Telegram-Chat sind Reaktionen ausgeschaltet.'
+    : allowed
+      ? `Telegram erlaubt ${emoji} hier nicht als Reaktion. Möglich: ${allowed.slice(0, 24).join(' ')}`
+      : `Telegram erlaubt ${emoji} hier nicht als Reaktion.`;
+  return Object.assign(new Error(msg), { statusCode: 400 });
 }
 
 function mapReactions(r?: Api.TypeMessageReactions): Reaction[] {
