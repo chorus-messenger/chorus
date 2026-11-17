@@ -205,6 +205,8 @@ export interface Adapter {
   sendText(chatRemoteId: string, text: string, replyTo?: string | null, mentions?: Mention[]): Promise<string>;
   sendFile(chatRemoteId: string, file: OutgoingFile, caption?: string, replyTo?: string | null, mentions?: Mention[]): Promise<string>;
   react(chatRemoteId: string, remoteId: string, emoji: string | null): Promise<void>;
+  /** Erlaubte Reaktionen im Chat (null = beliebige Emojis) */
+  allowedReactions?(chatRemoteId: string): Promise<string[] | null>;
   edit(chatRemoteId: string, remoteId: string, text: string): Promise<void>;
   delete(chatRemoteId: string, remoteId: string, forEveryone: boolean): Promise<void>;
   markRead(chatRemoteId: string, remoteId: string): Promise<void>;

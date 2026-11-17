@@ -479,6 +479,7 @@ app.get('/api/chats/:id/avatar', async (req, reply) => {
   reply.header('Cache-Control', 'private, max-age=31536000, immutable');
   return reply.send(data);
 });
+app.get('/api/chats/:id/reactions', async (req) => ({ allowed: await H(req).allowedReactions((req.params as any).id) }));
 app.get('/api/chats/:id/sender-avatars', async (req) => H(req).senderAvatars((req.params as any).id));
 app.get('/api/chats/:id/people/:sid/avatar', async (req, reply) => {
   const h = H(req); const { id, sid } = req.params as any;
