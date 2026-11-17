@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Store } from './db.js';
 import { toOggOpusTimed } from './audio.js';
-import type { Account, AccountStatus, Adapter, AdapterEvents, Attachment, Network, OutgoingFile, Message, Chat } from './types.js';
+import type { Account, AccountStatus, Adapter, AdapterEvents, Attachment, Network, OutgoingFile, Message, Chat, Poll, PollVote, NewPoll } from './types.js';
 
 export type AdapterFactory = (opts: {
   accountId: string;
@@ -170,6 +170,24 @@ export class Hub {
         const msg = store.patchMessage(`${chatId(chatRemote)}:${remoteId}`, { reactions });
         if (msg) this.emit({ type: 'message', message: msg });
       },
+      pollVote: (chatRemote, remoteId, vote) => {
+        for (const id of this.pollIds(accountId, chatId, chatRemote, remoteId)) {
+          const cur = store.getMessage(id);
+          if (!cur?.poll) continue;
+          const poll = applyVote(cur.poll, vote);
+          if (poll === cur.poll) continue;
+          const msg = store.setPoll(id, poll);
+          if (msg) this.emit({ type: 'message', message: msg });
+        }
+      },
+      pollUpdate: (chatRemote, remoteId, patch) => {
+        for (const id of this.pollIds(accountId, chatId, chatRemote, remoteId)) {
+          const cur = store.getMessage(id);
+          if (!cur?.poll) continue;
+          const msg = store.setPoll(id, { ...cur.poll, ...patch });
+          if (msg) this.emit({ type: 'message', message: msg });
+        }
+      },
       reactionChange: (chatRemote, remoteId, r, remove) => {
         const id = `${chatId(chatRemote)}:${remoteId}`;
         const cur = store.getMessage(id);
@@ -276,11 +294,11 @@ export class Hub {
   }
 
   /** Optimistisch: Nachricht sofort anzeigen, dann senden */
-  private pending(chat: Chat, text: string, replyTo: string | null | undefined, attachments: Message['attachments']): Message {
+  private pending(chat: Chat, text: string, replyTo: string | null | undefined, attachments: Message['attachments'], poll?: Poll): Message {
     const tmp = 'local-' + randomUUID();
     const { msg } = this.store.upsertMessage({
       chatId: chat.id, remoteId: tmp, senderId: 'me', senderName: 'Ich', fromMe: true, ts: Date.now(), text,
-      replyToRemoteId: replyTo ?? null, edited: false, deleted: false, attachments, status: 'pending',
+      replyToRemoteId: replyTo ?? null, edited: false, deleted: false, attachments, status: 'pending', ...(poll ? { poll } : {}),
     });
     this.emit({ type: 'message', message: msg });
     this.draftSent(chat.id, msg);
@@ -390,6 +408,48 @@ export class Hub {
     const a = this.adapterFor(chat);
     if (!a.allowedReactions) return null;
     try { return await a.allowedReactions(chat.remoteId); } catch { return null; }
+  }
+
+  private pollIds(accountId: string, chatId: (r: string) => string, chatRemote: string, remoteId: string): string[] {
+    if (remoteId.startsWith('ref:')) return this.store.findPollByRef(accountId, remoteId.slice(4));
+    if (chatRemote !== '*' && this.store.getMessage(`${chatId(chatRemote)}:${remoteId}`)) return [`${chatId(chatRemote)}:${remoteId}`];
+    return this.store.findByRemote(accountId, remoteId);
+  }
+
+  /** Umfrage senden (Telegram, WhatsApp, Signal) */
+  async sendPoll(chatId: string, p: NewPoll) {
+    const chat = this.chatOrThrow(chatId);
+    const a = this.adapterFor(chat);
+    if (!a.sendPoll) throw Object.assign(new Error('Umfragen gibt es bei diesem Messenger nicht'), { statusCode: 400 });
+    const question = p.question.trim();
+    const options = p.options.map((o) => o.trim()).filter(Boolean);
+    if (!question || options.length < 2) throw Object.assign(new Error('Eine Umfrage braucht eine Frage und mindestens zwei Antworten'), { statusCode: 400 });
+    const max = chat.network === 'whatsapp' ? 12 : 10;
+    if (options.length > max) throw Object.assign(new Error(max === 12 ? 'Höchstens 12 Antworten' : 'Höchstens 10 Antworten'), { statusCode: 400 });
+    if (new Set(options).size !== options.length) throw Object.assign(new Error('Jede Antwort darf nur einmal vorkommen'), { statusCode: 400 });
+    const poll = { question, options, multi: !!p.multi };
+    const tmp = this.pending(chat, '📊 ' + question, null, [], { ...poll, votes: [] });
+    return this.finish(chat, tmp, () => a.sendPoll!(chat.remoteId, poll));
+  }
+
+  /** In einer Umfrage abstimmen; options leer = Stimme zurückziehen */
+  async vote(messageId: string, options: number[]) {
+    const msg = this.store.getMessage(messageId);
+    if (!msg?.poll) throw new Error('Umfrage nicht gefunden');
+    if (msg.poll.closed) throw Object.assign(new Error('Die Umfrage ist beendet'), { statusCode: 400 });
+    const chat = this.chatOrThrow(msg.chatId);
+    const a = this.adapterFor(chat);
+    if (!a.vote) throw Object.assign(new Error('Abstimmen geht bei diesem Messenger nicht'), { statusCode: 400 });
+    const opts = [...new Set(options.filter((i) => Number.isInteger(i) && i >= 0 && i < msg.poll!.options.length))];
+    if (!msg.poll.multi && opts.length > 1) opts.length = 1;
+    await a.vote(chat.remoteId, msg.remoteId, opts, msg.poll);
+    // Lokal sofort zeigen (Signal meldet die eigene Stimme nicht zurück, Telegram schickt die Zählung hinterher)
+    const cur = this.store.getMessage(messageId)!;
+    const mine = cur.poll!.votes.find((v) => v.fromMe);
+    const poll = applyVote(cur.poll!, { id: 'me', fromMe: true, options: opts, n: (mine?.n ?? 0) + 1 });
+    if (poll === cur.poll) return;
+    const m = this.store.setPoll(messageId, poll);
+    if (m) this.emit({ type: 'message', message: m });
   }
 
   async react(messageId: string, emoji: string | null) {
@@ -733,4 +793,21 @@ export function previewText(m: Message): string {
   if (!a) return '';
   if (a.gif || /^image\/gif/i.test(a.mime)) return 'GIF';
   return { image: '📷 Foto', video: '🎬 Video', audio: '🎵 Audio', voice: '🎤 Sprachnachricht', file: '📎 ' + a.name, sticker: 'Sticker' }[a.kind];
+}
+
+/** Stimme einer Person in die Umfrage übernehmen (ersetzt ihre vorige; Signal: ältere Stimmen mit kleinerem Zähler ignorieren) */
+export function applyVote(poll: Poll, v: PollVote): Poll {
+  const same = (x: PollVote) => (v.fromMe && x.fromMe) || (!v.fromMe && !x.fromMe && x.id === v.id);
+  const old = poll.votes.find(same);
+  if (old && v.n != null && old.n != null && v.n < old.n) return poll;
+  const votes = poll.votes.filter((x) => !same(x));
+  // Leere Auswahl mit Zähler behalten (Signal: der nächste Zähler muss höher sein)
+  if (v.options.length || v.n != null) votes.push({ ...v, name: v.name ?? old?.name });
+  // Telegram zählt selbst: eigene Änderung in der Zählung vorwegnehmen, bis die echte Zählung kommt
+  let counts = poll.counts, total = poll.total;
+  if (counts && v.fromMe) {
+    counts = counts.map((c, i) => c - (old?.options.includes(i) ? 1 : 0) + (v.options.includes(i) ? 1 : 0));
+    total = (total ?? 0) - (old?.options.length ? 1 : 0) + (v.options.length ? 1 : 0);
+  }
+  return { ...poll, votes, ...(counts ? { counts, total } : {}) };
 }

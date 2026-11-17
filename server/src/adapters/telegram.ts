@@ -4,7 +4,7 @@ import { NewMessage, type NewMessageEvent } from 'telegram/events/index.js';
 import { EditedMessage, type EditedMessageEvent } from 'telegram/events/EditedMessage.js';
 import { CustomFile } from 'telegram/client/uploads.js';
 import bigInt from 'big-integer';
-import type { Adapter, AdapterEvents, Attachment, Mention, OutgoingFile, Reaction } from '../types.js';
+import type { Adapter, AdapterEvents, Attachment, Mention, NewPoll, OutgoingFile, Poll, Reaction } from '../types.js';
 import type { AdapterFactory } from '../hub.js';
 
 /**
@@ -183,6 +183,8 @@ export class TelegramAdapter implements Adapter {
       const s = await m.getSender();
       if (s) senderName = 'title' in s ? s.title : [(s as Api.User).firstName, (s as Api.User).lastName].filter(Boolean).join(' ');
     } catch { /* ignore */ }
+    const poll = m.media instanceof Api.MessageMediaPoll ? tgPoll(m.media) : undefined;
+    if (poll && m.media instanceof Api.MessageMediaPoll) this.polls.set(poll.ref!, m.media.poll.answers.map((a) => Buffer.from(a.option)));
     this.ev.message({
       chatRemoteId,
       remoteId: String(m.id),
@@ -190,7 +192,8 @@ export class TelegramAdapter implements Adapter {
       senderName,
       fromMe: !!m.out,
       ts: m.date * 1000,
-      text: m.message ?? '',
+      text: poll ? '📊 ' + poll.question : m.message ?? '',
+      ...(poll ? { poll } : {}),
       replyToRemoteId: m.replyTo?.replyToMsgId ? String(m.replyTo.replyToMsgId) : null,
       edited: !!m.editDate && !m.editHide,
       deleted: false,
@@ -202,8 +205,23 @@ export class TelegramAdapter implements Adapter {
     });
   }
 
+  /** Umfrage-ID → Kennungen der Antworten (für die Zuordnung der Zählung) */
+  private polls = new Map<string, Buffer[]>();
+
+  /** Neue Zählung einer Umfrage. Telegram nennt nur die Umfrage-ID, nicht die Nachricht */
+  private onPoll(u: Api.UpdateMessagePoll) {
+    const ref = u.pollId.toString();
+    const keys = u.poll ? u.poll.answers.map((a) => Buffer.from(a.option)) : this.polls.get(ref);
+    if (u.poll) this.polls.set(ref, keys!);
+    const patch: Partial<Poll> = { ...tgResults(u.results, keys) };
+    if (u.poll) patch.closed = !!u.poll.closed;
+    this.ev.pollUpdate('*', 'ref:' + ref, patch);
+  }
+
   private onRaw(u: Api.TypeUpdate) {
-    if (u instanceof Api.UpdateMessageReactions) {
+    if (u instanceof Api.UpdateMessagePoll) {
+      this.onPoll(u);
+    } else if (u instanceof Api.UpdateMessageReactions) {
       this.ev.reactions(utils.getPeerId(u.peer).toString(), String(u.msgId), mapReactions(u.reactions));
     } else if (u instanceof Api.UpdateDeleteChannelMessages) {
       const chat = utils.getPeerId(new Api.PeerChannel({ channelId: u.channelId })).toString();
@@ -272,6 +290,27 @@ export class TelegramAdapter implements Adapter {
         : undefined,
     });
     return String(r.id);
+  }
+
+  async sendPoll(chat: string, p: NewPoll) {
+    const text = (t: string) => new Api.TextWithEntities({ text: t, entities: [] });
+    const media = new Api.InputMediaPoll({ poll: new Api.Poll({
+      id: bigInt(0), question: text(p.question), multipleChoice: p.multi || undefined,
+      answers: p.options.map((o, i) => new Api.PollAnswer({ text: text(o), option: Buffer.from([i]) })),
+    }) });
+    const r = await this.c.sendFile(await this.peer(chat), { file: media as any });
+    return String(r.id);
+  }
+
+  async vote(chat: string, id: string, options: number[]) {
+    const peer = await this.peer(chat);
+    const [msg] = await this.c.getMessages(peer, { ids: [Number(id)] });
+    const media = msg?.media;
+    if (!(media instanceof Api.MessageMediaPoll)) throw new Error('Umfrage bei Telegram nicht gefunden');
+    const answers = media.poll.answers;
+    this.polls.set(media.poll.id.toString(), answers.map((a) => Buffer.from(a.option)));
+    const res: any = await this.c.invoke(new Api.messages.SendVote({ peer, msgId: Number(id), options: options.map((i) => Buffer.from(answers[i].option)) }));
+    for (const u of res?.updates ?? []) if (u instanceof Api.UpdateMessagePoll) this.onPoll(u);
   }
 
   async react(chat: string, id: string, emoji: string | null) {
@@ -397,6 +436,33 @@ export class TelegramAdapter implements Adapter {
 function ttlMedia(m: Api.Message): boolean {
   const md = m.media;
   return (md instanceof Api.MessageMediaPhoto || md instanceof Api.MessageMediaDocument) && !!md.ttlSeconds;
+}
+
+const tlText = (t: unknown): string => typeof t === 'string' ? t : (t as { text?: string } | null)?.text ?? '';
+
+function tgPoll(media: Api.MessageMediaPoll): Poll {
+  const p = media.poll;
+  const keys = p.answers.map((a) => Buffer.from(a.option));
+  return {
+    question: tlText(p.question), options: p.answers.map((a) => tlText(a.text)), multi: !!p.multipleChoice,
+    ...(p.quiz ? { quiz: true } : {}), ...(p.closed ? { closed: true } : {}), ref: p.id.toString(),
+    votes: [], ...tgResults(media.results, keys),
+  };
+}
+
+/** Zählung je Antwort und meine Auswahl. min = ohne meine Auswahl (dann bleibt die bekannte) */
+function tgResults(r: Api.TypePollResults | undefined, keys?: Buffer[]): Partial<Poll> {
+  if (!(r instanceof Api.PollResults) || !r.results) return r instanceof Api.PollResults && r.totalVoters != null ? { total: r.totalVoters } : {};
+  const res = r.results;
+  const at = (i: number) => keys ? res.find((x) => Buffer.from(x.option).equals(keys[i])) : res[i];
+  const n = keys?.length ?? res.length;
+  const counts = Array.from({ length: n }, (_, i) => at(i)?.voters ?? 0);
+  const out: Partial<Poll> = { counts, total: r.totalVoters ?? counts.reduce((a, b) => a + b, 0) };
+  if (!r.min) {
+    const mine = counts.flatMap((_, i) => (at(i)?.chosen ? [i] : []));
+    out.votes = mine.length ? [{ id: 'me', fromMe: true, options: mine }] : [];
+  }
+  return out;
 }
 
 function mediaToAttachments(m: Api.Message): Attachment[] {

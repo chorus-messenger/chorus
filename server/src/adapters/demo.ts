@@ -1,5 +1,5 @@
 import { crc32 } from 'node:zlib';
-import type { Adapter, AdapterEvents, OutgoingFile } from '../types.js';
+import type { Adapter, AdapterEvents, NewPoll, OutgoingFile } from '../types.js';
 import type { AdapterFactory } from '../hub.js';
 import { deflateSync } from 'node:zlib';
 
@@ -75,7 +75,16 @@ export class DemoAdapter implements Adapter {
         });
       }
     }
+    // Beispiel-Umfrage in der Laufgruppe
+    this.ev.message({
+      chatRemoteId: 'verein', remoteId: 'poll1', senderId: 'Jonas', senderName: 'Jonas', fromMe: false, ts: now - 2950 * 60_000,
+      text: '📊 Welche Strecke am Sonntag?', edited: false, deleted: false, attachments: [], status: 'received',
+      poll: { question: 'Welche Strecke am Sonntag?', options: ['10 km am Fluss', 'Halbmarathon', 'Intervalle im Park'], multi: false,
+        votes: [{ id: 'Jonas', name: 'Jonas', fromMe: false, options: [0] }, { id: 'Sarah', name: 'Sarah', fromMe: false, options: [0] }, { id: 'Mia', name: 'Mia', fromMe: false, options: [2] }] },
+    });
   }
+  async sendPoll(_chat: string, _p: NewPoll) { return this.uid(); }
+  async vote() {}
   async stop() { this.timers.forEach(clearTimeout); }
   async input() {}
   private reply(chat: string, text: string) {

@@ -14,6 +14,7 @@ import { useStorage } from '../storageState';
 import { NextcloudBrowser } from './NextcloudBrowser';
 import { ImmichPicker } from './ImmichPicker';
 import { GifPicker } from './GifPicker';
+import { PollSheet, canPoll } from './Poll';
 import { useAi } from '../aiState';
 import { WhenPicker, whenLabel } from './WhenPicker';
 import { T, lang, locale } from '../i18n';
@@ -50,6 +51,7 @@ export function Composer({ chat, onPickLang, draftId, serverDraft, placeholder, 
   const trUnknown = !!(tr?.on && tr.out !== false && !tr.lang);
   const [noTr, setNoTr] = useState(false);
   const [gifPick, setGifPick] = useState(false);
+  const [pollOpen, setPollOpen] = useState(false);
   const [when, setWhen] = useState(false);
   // Entwurf: lokal sofort, auf dem Server kurz verzögert (geräteübergreifend). Der neuere Stand gewinnt.
   const draftTsKey = `inbox:draftTs:${draftId ?? chat.id}`;
@@ -375,12 +377,14 @@ export function Composer({ chat, onPickLang, draftId, serverDraft, placeholder, 
           {!editing && storage?.nextcloud.enabled && <button onClick={() => { setAttMenu(false); setNcPick(true); }}><Icon name="folder" size={18} />{T('Aus Nextcloud')}</button>}
           <button onClick={() => { setAttMenu(false); setEmoji(true); }}><Icon name="smile" size={18} />Emoji</button>
           {!editing && <button onClick={() => { setAttMenu(false); setEmoji(false); setGifPick(true); }}><span className="gif-badge menu-gif">GIF</span>{T('GIF senden')}</button>}
+          {!editing && canPoll(chat) && <button onClick={() => { setAttMenu(false); setPollOpen(true); }}><Icon name="poll" size={18} />{T('Umfrage')}</button>}
         </div>
       </>}
       {gifPick && toBody(<GifPicker onClose={() => setGifPick(false)} onPick={(g) => {
         setGifPick(false); onSent();
         api.sendGif(chat.id, g.id, replyTo?.remoteId).catch((e: any) => onError(e.message));
       }} />)}
+      {pollOpen && toBody(<PollSheet chat={chat} onClose={() => setPollOpen(false)} onError={onError} />)}
       {imPick && toBody(<ImmichPicker onClose={() => setImPick(false)} onPick={(add) => setFiles((f) => [...f, ...add])} />)}
       {ncPick && toBody(<NextcloudBrowser mode="pick" onClose={() => setNcPick(false)} onPick={(add) => setFiles((f) => [...f, ...add])} />)}
       {rec ? (

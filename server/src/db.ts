@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from '
 import { randomUUID } from 'node:crypto';
 import { seal, open } from './crypto.js';
 import { fixKind } from './kinds.js';
-import type { Account, Chat, Message, Network, AccountStatus, Reaction, Attachment, ContactInfo } from './types.js';
+import type { Account, Chat, Message, Network, AccountStatus, Reaction, Attachment, ContactInfo, Poll } from './types.js';
 
 /** Verschlüsselte Datenbank (SQLCipher) + verschlüsselte Dateiablage */
 export class Store {
@@ -71,6 +71,8 @@ export class Store {
     if (!mcols.includes('expires_at')) { this.db.exec('ALTER TABLE messages ADD COLUMN expires_at INTEGER'); this.db.exec('CREATE INDEX IF NOT EXISTS messages_expiry ON messages(expires_at) WHERE expires_at IS NOT NULL'); }
     if (!mcols.includes('history')) this.db.exec('ALTER TABLE messages ADD COLUMN history TEXT');
     if (!mcols.includes('view_once')) this.db.exec('ALTER TABLE messages ADD COLUMN view_once INTEGER NOT NULL DEFAULT 0');
+    if (!mcols.includes('poll')) this.db.exec('ALTER TABLE messages ADD COLUMN poll TEXT');
+    this.db.exec(`CREATE INDEX IF NOT EXISTS messages_poll_ref ON messages(json_extract(poll, '$.ref')) WHERE poll IS NOT NULL`);
     if (!cols.includes('autopilot')) this.db.exec('ALTER TABLE chats ADD COLUMN autopilot TEXT');
     for (const [c, t] of [['archived', 'INTEGER NOT NULL DEFAULT 0'], ['alias', 'TEXT'], ['custom_avatar', 'TEXT'], ['info', 'TEXT'], ['note', 'TEXT'], ['translate', 'TEXT'], ['link', 'TEXT'], ['send_via', 'TEXT'], ['peer', 'TEXT'], ['draft', 'TEXT'], ['draft_ts', 'INTEGER']] as const)
       if (!cols.includes(c)) this.db.exec(`ALTER TABLE chats ADD COLUMN ${c} ${t}`);
@@ -327,28 +329,40 @@ export class Store {
       translationFrom: r.translation_from ?? null, html: r.html ?? null, summary: r.summary ?? null, expiresAt: r.expires_at ?? null, history: r.history ? JSON.parse(r.history) : [],
       ...(r.pinned_at ? { pinnedAt: r.pinned_at } : {}), ...(r.starred ? { starred: true } : {}),
       ...(r.view_once ? { viewOnce: true } : {}),
+      ...(r.poll ? { poll: JSON.parse(r.poll) } : {}),
     };
   }
   /** true, wenn die Nachricht neu war */
   upsertMessage(m: Omit<Message, 'id' | 'reactions'> & { reactions?: Reaction[] }): { msg: Message; isNew: boolean } {
     const id = `${m.chatId}:${m.remoteId}`;
-    const ex = this.db.prepare('SELECT id, text, deleted, attachments, view_once FROM messages WHERE id=?').get(id) as { id: string; text: string; deleted: number; attachments: string; view_once: number } | undefined;
+    const ex = this.db.prepare('SELECT id, text, deleted, attachments, view_once, poll FROM messages WHERE id=?').get(id) as { id: string; text: string; deleted: number; attachments: string; view_once: number; poll: string | null } | undefined;
     if (ex) {
+      // Umfrage erneut gemeldet (Abgleich, Bearbeitung): bekannte Stimmen und Schlüssel behalten, wenn die neue Meldung keine hat
+      if (m.poll && ex.poll) { const old = JSON.parse(ex.poll) as Poll; m = { ...m, poll: { ...m.poll, votes: m.poll.votes.length ? m.poll.votes : old.votes, ref: m.poll.ref ?? old.ref, counts: m.poll.counts ?? old.counts, total: m.poll.total ?? old.total } }; }
       // Einmalansicht: Nach dem Öffnen/Ablaufen melden Messenger (z. B. Telegram) die Nachricht ohne Medium neu. Gesicherte Anhänge behalten.
       if ((ex.view_once || m.viewOnce) && !m.attachments.length && ex.attachments !== '[]') m = { ...m, attachments: JSON.parse(ex.attachments) };
       // Behaltene gelöschte Nachricht nicht durch einen späteren Abgleich überschreiben
       if (ex.deleted && !m.deleted) return { msg: this.getMessage(id)!, isNew: false };
       if (m.edited) this.keepVersion(id, ex.text, m.text);
       this.db.prepare(`UPDATE messages SET text=?, edited=?, deleted=?, attachments=?, status=CASE WHEN ?='pending' THEN status ELSE ? END,
-        reactions=COALESCE(?, reactions), html=COALESCE(?, html), view_once=MAX(view_once, ?) WHERE id=?`).run(m.text, Number(m.edited), Number(m.deleted), JSON.stringify(m.attachments),
-        m.status, m.status, m.reactions ? JSON.stringify(m.reactions) : null, m.html ?? null, Number(!!m.viewOnce), id);
+        reactions=COALESCE(?, reactions), html=COALESCE(?, html), view_once=MAX(view_once, ?), poll=COALESCE(?, poll) WHERE id=?`).run(m.text, Number(m.edited), Number(m.deleted), JSON.stringify(m.attachments),
+        m.status, m.status, m.reactions ? JSON.stringify(m.reactions) : null, m.html ?? null, Number(!!m.viewOnce), m.poll ? JSON.stringify(m.poll) : null, id);
     } else {
-      this.db.prepare(`INSERT INTO messages(id,chat_id,remote_id,sender_id,sender_name,from_me,ts,text,reply_to,edited,deleted,attachments,reactions,status,transcript,html,view_once)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, m.chatId, m.remoteId, m.senderId, m.senderName, Number(m.fromMe), m.ts, m.text,
+      this.db.prepare(`INSERT INTO messages(id,chat_id,remote_id,sender_id,sender_name,from_me,ts,text,reply_to,edited,deleted,attachments,reactions,status,transcript,html,view_once,poll)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, m.chatId, m.remoteId, m.senderId, m.senderName, Number(m.fromMe), m.ts, m.text,
         m.replyToRemoteId ?? null, Number(m.edited), Number(m.deleted), JSON.stringify(m.attachments), JSON.stringify(m.reactions ?? []),
-        m.status, m.transcript ?? null, m.html ?? null, Number(!!m.viewOnce));
+        m.status, m.transcript ?? null, m.html ?? null, Number(!!m.viewOnce), m.poll ? JSON.stringify(m.poll) : null);
     }
     return { msg: this.getMessage(id)!, isNew: !ex };
+  }
+  /** Umfrage über die Kennung des Messengers finden (Telegram meldet Zählungen nur mit der Umfrage-ID) */
+  findPollByRef(accountId: string, ref: string): string[] {
+    return (this.db.prepare(`SELECT m.id FROM messages m JOIN chats c ON c.id=m.chat_id WHERE c.account_id=? AND m.poll IS NOT NULL AND json_extract(m.poll, '$.ref')=?`)
+      .all(accountId, ref) as { id: string }[]).map((r) => r.id);
+  }
+  setPoll(id: string, poll: Poll): Message | null {
+    this.db.prepare('UPDATE messages SET poll=? WHERE id=?').run(JSON.stringify(poll), id);
+    return this.getMessage(id);
   }
   outgoingUpTo(chatId: string, maxNumericId: number): string[] {
     return (this.db.prepare(`SELECT id FROM messages WHERE chat_id=? AND from_me=1 AND status IN ('sent','delivered')

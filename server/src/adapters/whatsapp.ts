@@ -1,9 +1,11 @@
 import makeWASocket, {
   Browsers, BufferJSON, DisconnectReason, initAuthCreds, makeCacheableSignalKeyStore, downloadMediaMessage, normalizeMessageContent,
-  jidNormalizedUser, isJidGroup, proto, type AuthenticationState, type SignalDataTypeMap, type WAMessage, type WAMessageKey, type WASocket,
+  jidNormalizedUser, isJidGroup, proto, generateMessageIDV2, type AuthenticationState, type SignalDataTypeMap, type WAMessage, type WAMessageKey, type WASocket,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
-import type { Adapter, AdapterEvents, Attachment, Mention, OutgoingFile, Message } from '../types.js';
+import type { Adapter, AdapterEvents, Attachment, Mention, NewPoll, OutgoingFile, Message, Poll, PollVote } from '../types.js';
+import { encryptPollVote, optionIndexes, tryDecryptPollVote } from '../wapoll.js';
+import { randomBytes } from 'node:crypto';
 import { replaceMentions } from '../mentions.js';
 import type { AdapterFactory } from '../hub.js';
 import { waveform } from '../audio.js';
@@ -275,12 +277,16 @@ export class WhatsAppAdapter implements Adapter {
       return;
     }
 
+    if (content.pollUpdateMessage) { this.onPollVote(m, chat, content.pollUpdateMessage); return; }
+
     if (!historic && !key.fromMe) this.watchPresence(key.remoteJid, chat);
     const senderJid = key.fromMe ? 'me' : jidNormalizedUser(key.participantAlt?.endsWith('@s.whatsapp.net') ? key.participantAlt : (key.participant || key.remoteJid));
     if (!key.fromMe && m.pushName) this.setName(senderJid, this.names.get(senderJid) ?? m.pushName);
     const senderName = key.fromMe ? 'Ich' : this.names.get(senderJid) ?? m.pushName ?? '+' + senderJid.split('@')[0];
 
     let text = content.conversation ?? content.extendedTextMessage?.text ?? '';
+    const poll = this.pollOf(m, content);
+    if (poll) text = '📊 ' + poll.question;
     const atts: Attachment[] = [];
     const ref = () => JSON.stringify({ key, message: m.message }, BufferJSON.replacer);
     if (content.imageMessage) { const i = content.imageMessage; text = i.caption ?? ''; atts.push({ fileId: null, remoteRef: ref(), name: `foto-${key.id}.jpg`, mime: i.mimetype ?? 'image/jpeg', size: Number(i.fileLength ?? 0), kind: 'image', width: i.width ?? undefined, height: i.height ?? undefined }); }
@@ -291,7 +297,6 @@ export class WhatsAppAdapter implements Adapter {
     if (!text && !atts.length) {
       if (content.locationMessage) text = `📍 Standort: https://maps.google.com/?q=${content.locationMessage.degreesLatitude},${content.locationMessage.degreesLongitude}`;
       else if (content.contactMessage) text = `👤 Kontakt: ${content.contactMessage.displayName ?? ''}`;
-      else if (content.pollCreationMessage || content.pollCreationMessageV3) text = `📊 Umfrage: ${(content.pollCreationMessage ?? content.pollCreationMessageV3)?.name ?? ''}`;
       else return;
     }
     const ctx = content.extendedTextMessage?.contextInfo ?? content.imageMessage?.contextInfo ?? content.videoMessage?.contextInfo
@@ -303,8 +308,104 @@ export class WhatsAppAdapter implements Adapter {
       chatRemoteId: chat, remoteId: key.id, senderId: senderJid, senderName, fromMe: !!key.fromMe, ts, text,
       replyToRemoteId: ctx?.stanzaId ?? null, edited: false, deleted: false, attachments: atts,
       status: key.fromMe ? (m.status != null && m.status >= 4 ? 'read' : m.status === 3 ? 'delivered' : 'sent') : 'received',
-      historic, ...(isViewOnce(m.message, content) ? { viewOnce: true } : {}),
+      historic, ...(isViewOnce(m.message, content) ? { viewOnce: true } : {}), ...(poll ? { poll } : {}),
     });
+  }
+
+  // ---------- Umfragen ----------
+  private meIds() {
+    const u = this.sock?.user;
+    return [u?.id, u?.lid].filter((x): x is string => !!x).map(jidNormalizedUser);
+  }
+  /** Telefonnummer-JID bevorzugen (wie senderId), LID nur wenn keine Nummer bekannt */
+  private personId(jid: string) {
+    const j = jidNormalizedUser(jid);
+    return j.endsWith('@lid') ? this.pnOf.get(j) ?? j : j;
+  }
+  private bothForms(jids: (string | null | undefined)[]) {
+    const out: string[] = [];
+    for (const x of jids) {
+      if (!x || isJidGroup(x)) continue;
+      const j = jidNormalizedUser(x);
+      out.push(j);
+      const o = j.endsWith('@lid') ? this.pnOf.get(j) : this.lidOf.get(j);
+      if (o) out.push(o);
+    }
+    return out;
+  }
+
+  /** Umfrage aus einer Nachricht. ref = messageSecret|Ersteller (wie im Schlüssel, „me“ = ich)|lid/pn (für das Abstimmen) */
+  private pollOf(m: WAMessage, content: proto.IMessage): Poll | undefined {
+    const pc = content.pollCreationMessage ?? content.pollCreationMessageV2 ?? content.pollCreationMessageV3 ?? content.pollCreationMessageV5;
+    if (!pc) return undefined;
+    const options = (pc.options ?? []).map((o) => o.optionName ?? '');
+    const secret = content.messageContextInfo?.messageSecret ?? m.message?.messageContextInfo?.messageSecret;
+    const k = m.key;
+    const addr = k.participant || k.remoteJid || '';
+    const mode = addr.endsWith('@lid') ? 'lid' : isJidGroup(addr) ? '' : 'pn';
+    const creator = k.fromMe ? 'me' : jidNormalizedUser(addr);
+    const votes: PollVote[] = [];
+    // Verlauf vom Handy: Stimmen kommen schon entschlüsselt mit
+    for (const u of m.pollUpdates ?? []) {
+      const vk = u.pollUpdateMessageKey;
+      if (!vk) continue;
+      const fromMe = !!vk.fromMe;
+      const id = fromMe ? 'me' : this.personId(vk.participant || vk.remoteJid || '');
+      const opts = optionIndexes(options, (u.vote?.selectedOptions ?? []) as Uint8Array[]);
+      const v: PollVote = { id, fromMe, options: opts, n: Number(u.senderTimestampMs ?? 0), ...(fromMe ? {} : { name: this.names.get(id) }) };
+      const i = votes.findIndex((x) => x.id === id);
+      if (i < 0) votes.push(v); else if ((votes[i].n ?? 0) <= (v.n ?? 0)) votes[i] = v;
+    }
+    return {
+      question: pc.name ?? '', options, multi: (pc.selectableOptionsCount ?? 0) !== 1, votes: votes.filter((v) => v.options.length),
+      ...(secret?.length ? { ref: `${Buffer.from(secret).toString('base64')}|${creator}|${mode}` } : {}),
+    };
+  }
+
+  private onPollVote(m: WAMessage, chat: string, pu: proto.Message.IPollUpdateMessage) {
+    const ck = pu.pollCreationMessageKey;
+    if (!ck?.id || !pu.vote) return;
+    const poll = this.ev.getMessage(chat, ck.id)?.poll;
+    const [sec, creatorForm] = poll?.ref?.split('|') ?? [];
+    if (!poll || !sec) { this.ev.log(`Umfrage-Stimme für unbekannte Umfrage ${ck.id}`); return; }
+    const key = m.key;
+    const me = this.meIds();
+    const stored = this.ev.getMessage(chat, ck.id);
+    const creators = ck.fromMe || creatorForm === 'me' ? me
+      : this.bothForms([creatorForm, ck.participant, (ck as any).participantAlt, ck.remoteJid, stored?.senderId]);
+    const voters = key.fromMe ? me : this.bothForms([key.participant, key.participantAlt, key.remoteJid, key.remoteJidAlt]);
+    const sel = tryDecryptPollVote(pu.vote, Buffer.from(sec, 'base64'), ck.id, creators, voters);
+    if (!sel) { this.ev.log(`Umfrage-Stimme ließ sich nicht entschlüsseln (${ck.id})`); return; }
+    const fromMe = !!key.fromMe;
+    const id = fromMe ? 'me' : this.personId(key.participantAlt?.endsWith('@s.whatsapp.net') ? key.participantAlt : (key.participant || key.remoteJid || ''));
+    this.ev.pollVote(chat, ck.id, {
+      id, fromMe, options: optionIndexes(poll.options, sel), n: Number(pu.senderTimestampMs ?? Date.now()),
+      ...(fromMe ? {} : { name: this.names.get(id) ?? m.pushName ?? undefined }),
+    });
+  }
+
+  async sendPoll(chat: string, p: NewPoll) {
+    const r = await this.s.sendMessage(chat, { poll: { name: p.question, values: p.options, selectableCount: p.multi ? 0 : 1, messageSecret: randomBytes(32) } });
+    if (r?.key) this.keys.set(r.key.id!, r.key);
+    return r!.key.id!;
+  }
+
+  async vote(chat: string, id: string, options: number[], poll: Poll) {
+    const [sec, creatorForm, mode] = poll.ref?.split('|') ?? [];
+    if (!sec) throw new Error('Für diese Umfrage fehlt Chorus der Schlüssel. Bitte am Handy abstimmen.');
+    let lid = mode === 'lid';
+    if (!mode && isJidGroup(chat)) { await this.members(chat).catch(() => {}); lid = this.lidGroups.has(chat); }
+    const u = this.s.user!;
+    const voter = lid && u.lid ? jidNormalizedUser(u.lid) : jidNormalizedUser(u.id);
+    const key = this.keyFor(chat, id);
+    const creator = creatorForm === 'me' || key.fromMe ? voter : creatorForm || jidNormalizedUser(key.participant || key.remoteJid!);
+    const vote = encryptPollVote(options.map((i) => poll.options[i]), { secret: Buffer.from(sec, 'base64'), pollMsgId: id, creator, voter });
+    await this.s.relayMessage(chat, {
+      pollUpdateMessage: {
+        pollCreationMessageKey: { remoteJid: key.remoteJid ?? chat, id, fromMe: !!key.fromMe, ...(isJidGroup(chat) && !key.fromMe ? { participant: creator } : {}) },
+        vote, senderTimestampMs: Date.now(),
+      },
+    }, { messageId: generateMessageIDV2(u.id), additionalNodes: [{ tag: 'meta', attrs: { polltype: 'vote' } }] });
   }
 
   /** WhatsApp schreibt Erwähnungen als „@4917…“ in den Text: durch „@Name“ ersetzen, soweit bekannt */
