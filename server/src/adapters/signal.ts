@@ -4,7 +4,7 @@ import { toAac } from '../audio.js';
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import type { Adapter, AdapterEvents, Attachment, Mention, OutgoingFile } from '../types.js';
+import type { Adapter, AdapterEvents, Attachment, Mention, NewPoll, OutgoingFile, Poll } from '../types.js';
 import { replaceMentions } from '../mentions.js';
 import type { AdapterFactory } from '../hub.js';
 import { packDir, unpackDir, secureTmpDir } from '../tarball.js';
@@ -337,6 +337,16 @@ export class SignalAdapter implements Adapter {
       this.ev.reactionChange(chat, target, { emoji: r.emoji, senderId: author, senderName: authorName, fromMe }, !!r.isRemove);
       return;
     }
+    if (d.pollVote) {
+      const v = d.pollVote;
+      const target = `${v.targetSentTimestamp}:${v.authorUuid ?? v.authorNumber ?? v.author}`;
+      this.ev.pollVote(chat, target, { id: author, name: fromMe ? undefined : authorName, fromMe, options: Array.isArray(v.optionIndexes) ? v.optionIndexes : [], n: Number(v.voteCount) || 0 });
+      return;
+    }
+    if (d.pollTerminate) {
+      this.ev.pollUpdate(chat, `${d.pollTerminate.targetSentTimestamp}:${author}`, { closed: true });
+      return;
+    }
     if (d.remoteDelete) {
       this.ev.messageUpdate(chat, `${d.remoteDelete.targetTimestamp}:${author}`, { deleted: true, text: '' });
       return;
@@ -345,7 +355,9 @@ export class SignalAdapter implements Adapter {
       this.ev.messageUpdate(chat, `${editOf}:${author}`, { text: this.withMentions(d), edited: true });
       return;
     }
-    if (d.message == null && !d.attachments?.length && !d.sticker) return; // z.B. Profil-Updates
+    const pc = d.pollCreate;
+    const poll = pc && Array.isArray(pc.options) ? { question: String(pc.question ?? ''), options: pc.options.map(String), multi: !!pc.allowMultiple, votes: [] } : undefined;
+    if (d.message == null && !d.attachments?.length && !d.sticker && !poll) return; // z.B. Profil-Updates
     const attachments: Attachment[] = (d.attachments ?? []).map((a: any) => ({
       fileId: null, remoteRef: a.id, name: a.filename || `datei-${a.id}`, mime: a.contentType || 'application/octet-stream', size: a.size ?? 0,
       kind: a.isVoiceNote ? 'voice' : a.contentType?.startsWith('image/') ? 'image' : a.contentType?.startsWith('video/') ? 'video' : a.contentType?.startsWith('audio/') ? 'audio' : 'file',
@@ -362,7 +374,8 @@ export class SignalAdapter implements Adapter {
       senderName: authorName,
       fromMe,
       ts: d.timestamp,
-      text: this.withMentions(d),
+      text: poll ? '📊 ' + poll.question : this.withMentions(d),
+      ...(poll ? { poll } : {}),
       replyToRemoteId: d.quote ? `${d.quote.id}:${d.quote.authorUuid ?? d.quote.authorNumber}` : null,
       edited: false,
       deleted: false,
@@ -444,6 +457,18 @@ export class SignalAdapter implements Adapter {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  }
+
+  async sendPoll(chat: string, p: NewPoll) {
+    const r = await this.call<{ timestamp: number }>('sendPollCreate', { ...this.target(chat), question: p.question, option: p.options, ...(p.multi ? {} : { noMulti: true }) });
+    return `${r.timestamp}:${this.me}`;
+  }
+
+  async vote(chat: string, remoteId: string, options: number[], poll: Poll) {
+    const { ts, author } = this.split(remoteId);
+    // Signal zählt die Stimmen einer Person hoch, die höchste gilt
+    const n = (poll.votes.find((v) => v.fromMe)?.n ?? 0) + 1;
+    await this.call('sendPollVote', { ...this.target(chat), pollAuthor: author, pollTimestamp: ts, option: options, voteCount: n });
   }
 
   async react(chat: string, remoteId: string, emoji: string | null) {

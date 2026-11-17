@@ -609,6 +609,16 @@ app.post('/api/messages/:id/forward', async (req) => {
   }
   return { ok: true, count: ids.length };
 });
+/** Umfrage erstellen und abstimmen (Telegram, WhatsApp, Signal) */
+app.post('/api/chats/:id/poll', async (req) => {
+  const b = (req.body ?? {}) as { question?: string; options?: string[]; multi?: boolean };
+  return H(req).sendPoll((req.params as any).id, { question: String(b.question ?? ''), options: Array.isArray(b.options) ? b.options.map(String) : [], multi: !!b.multi });
+});
+app.post('/api/messages/:id/vote', async (req) => {
+  const { options } = (req.body ?? {}) as { options?: number[] };
+  await H(req).vote((req.params as any).id, Array.isArray(options) ? options.map(Number) : []);
+  return { ok: true };
+});
 app.post('/api/messages/:id/react', async (req) => {
   const { emoji } = req.body as { emoji: string | null };
   await H(req).react((req.params as any).id, emoji);

@@ -64,6 +64,14 @@ export interface Message {
   expiresAt?: number | null;
   /** Wurde als Foto/Video zur Einmalansicht gesendet (Chorus behält es). Ohne Anhänge: Inhalt nur auf dem Handy */
   viewOnce?: boolean;
+  /** Umfrage (Telegram, WhatsApp, Signal) */
+  poll?: Poll | null;
+}
+export interface PollVote { id: string; name?: string; fromMe: boolean; options: number[] }
+export interface Poll {
+  question: string; options: string[]; multi: boolean; votes: PollVote[];
+  /** Telegram: Stimmen je Antwort und Teilnehmer (ohne Namen) */
+  counts?: number[]; total?: number; closed?: boolean; quiz?: boolean;
 }
 export interface LinkPreview { url: string; title: string | null; description: string | null; image: string | null; site: string | null; author?: string | null; video?: boolean }
 export interface PublicProfile {
@@ -275,6 +283,8 @@ export const api = {
       x.send(fd);
     });
   },
+  vote: (msgId: string, options: number[]) => req('POST', `/api/messages/${enc(msgId)}/vote`, { options }),
+  sendPoll: (chatId: string, poll: { question: string; options: string[]; multi: boolean }) => req<Message>('POST', `/api/chats/${enc(chatId)}/poll`, poll),
   react: (msgId: string, emoji: string | null) => req('POST', `/api/messages/${enc(msgId)}/react`, { emoji }),
   forward: (msgId: string, chatIds: string[]) => req<{ ok: boolean; count: number }>('POST', `/api/messages/${enc(msgId)}/forward`, { chatIds }),
   edit: (msgId: string, text: string) => req('PATCH', `/api/messages/${enc(msgId)}`, { text }),

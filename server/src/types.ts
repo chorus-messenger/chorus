@@ -154,7 +154,28 @@ export interface Message {
   /** Foto/Video/Sprachnachricht zur Einmalansicht (WhatsApp, Signal, Telegram). Chorus behält es wie ein normales Medium,
    *  zeigt aber an, dass es so gesendet wurde. Ohne Anhänge: der Messenger hat den Inhalt nicht mitgeschickt (WhatsApp an verknüpfte Geräte). */
   viewOnce?: boolean;
+  /** Umfrage (Telegram, WhatsApp, Signal). text enthält dann „📊 Frage“ für Vorschau, Suche und Push */
+  poll?: Poll | null;
 }
+
+/** Stimme einer Person: gewählte Optionen (Index). n = Zähler bei Signal (höhere Zahl = neuere Stimme) */
+export interface PollVote { id: string; name?: string; fromMe: boolean; options: number[]; n?: number }
+export interface Poll {
+  question: string;
+  options: string[];
+  /** mehrere Antworten erlaubt */
+  multi: boolean;
+  /** Stimmen je Person (WhatsApp, Signal; bei Telegram nur meine eigene) */
+  votes: PollVote[];
+  /** Telegram: Stimmen je Option und Anzahl Teilnehmer (Telegram verrät nicht, wer wie gestimmt hat) */
+  counts?: number[];
+  total?: number;
+  closed?: boolean;
+  quiz?: boolean;
+  /** Messenger-intern: WhatsApp messageSecret (Base64) bzw. Telegram-Umfrage-ID */
+  ref?: string;
+}
+export interface NewPoll { question: string; options: string[]; multi: boolean }
 
 /** Ereignisse, die Adapter an die Zentrale melden */
 export interface ReceiptBy { id?: string; name?: string; ts?: number; played?: boolean }
@@ -167,6 +188,10 @@ export interface AdapterEvents {
   /** by: wer bestätigt hat (Gruppen), wann und ob abgespielt (Sprachnachricht/Video); ohne by zählt die Bestätigung für den Chat */
   messageUpdate(chatRemoteId: string, remoteId: string, patch: Partial<Pick<Message, 'text' | 'edited' | 'deleted' | 'status'>>, by?: ReceiptBy): void;
   reactions(chatRemoteId: string, remoteId: string, reactions: Reaction[]): void;
+  /** Umfrage: Stimme einer Person setzen (leere options = zurückgezogen). chatRemoteId '*' = Chat unbekannt */
+  pollVote(chatRemoteId: string, remoteId: string, vote: PollVote): void;
+  /** Umfrage: Ergebnis/Status ändern (Telegram-Zählung, beendet) */
+  pollUpdate(chatRemoteId: string, remoteId: string, patch: Partial<Poll>): void;
   /** Einzelne Reaktion setzen/entfernen (ersetzt vorherige Reaktion desselben Absenders) */
   reactionChange(chatRemoteId: string, remoteId: string, r: Reaction, remove: boolean): void;
   /** Jemand tippt gerade (on) oder hat aufgehört; wird nicht gespeichert, nur live weitergegeben */
@@ -205,6 +230,10 @@ export interface Adapter {
   sendText(chatRemoteId: string, text: string, replyTo?: string | null, mentions?: Mention[]): Promise<string>;
   sendFile(chatRemoteId: string, file: OutgoingFile, caption?: string, replyTo?: string | null, mentions?: Mention[]): Promise<string>;
   react(chatRemoteId: string, remoteId: string, emoji: string | null): Promise<void>;
+  /** Umfrage senden, gibt die Nachrichten-ID zurück */
+  sendPoll?(chatRemoteId: string, poll: NewPoll): Promise<string>;
+  /** In einer Umfrage abstimmen (options leer = Stimme zurückziehen) */
+  vote?(chatRemoteId: string, remoteId: string, options: number[], poll: Poll): Promise<void>;
   /** Erlaubte Reaktionen im Chat (null = beliebige Emojis) */
   allowedReactions?(chatRemoteId: string): Promise<string[] | null>;
   edit(chatRemoteId: string, remoteId: string, text: string): Promise<void>;

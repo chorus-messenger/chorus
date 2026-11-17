@@ -8,6 +8,7 @@ import { NETWORKS, adjLang, duration, fileSize, hue, isOnlyEmoji, msgTime } from
 import type { Network } from '../api';
 import { whenLabel } from './WhenPicker';
 import { Icon } from './Icon';
+import { PollView } from './Poll';
 import { Avatar } from './Rail';
 import { player, usePlayer } from '../player';
 import { T, lang, locale } from '../i18n';
@@ -132,7 +133,7 @@ export const MessageBubble = memo(function MessageBubble({ m, album, group, show
       {onSwipe && <span className="sw-hint reply" aria-hidden="true"><Icon name="reply" size={18} /></span>}
       {onSwipe && <span className="sw-hint info" aria-hidden="true">{msgTime(last.ts)}</span>}
       {senderAvatar !== undefined && showName && <span className="msg-av"><Avatar name={m.senderName || '?'} src={senderAvatar} size={32} /></span>}
-      <div className={`bubble ${big ? 'big-emoji' : ''} ${media && !m.text ? 'media-only' : ''} ${media && m.text ? 'has-media' : ''} ${m.deleted ? (kept ? 'kept-deleted' : 'deleted') : ''}`}>
+      <div className={`bubble ${m.poll ? 'has-poll' : ''} ${big ? 'big-emoji' : ''} ${media && !m.text ? 'media-only' : ''} ${media && m.text ? 'has-media' : ''} ${m.deleted ? (kept ? 'kept-deleted' : 'deleted') : ''}`}>
         {showName && group && !m.fromMe && <div className="sender" style={{ color: `hsl(${hue(m.senderName)} 50% 42%)` }}>{m.senderName}</div>}
         {replied !== undefined && m.replyToRemoteId && (
           <button className="quote" onClick={() => onJump(m.replyToRemoteId!)}>
@@ -152,8 +153,10 @@ export const MessageBubble = memo(function MessageBubble({ m, album, group, show
           {mosaic && <Mosaic tiles={tiles} lead={m} />}
           {m.attachments.map((a, i) => mosaic && isTile(a) ? null : <AttachmentView key={i} m={m} a={a} i={i} />)}
           {hasAudio(m) && <Transcript m={m} onTranscribe={onTranscribe} onSummarize={onSummarize} />}
-          {m.text && (big ? <BigEmoji text={m.text} /> : <div className="text">{linkify(m.text)}</div>)}
-          {m.text && !big && !m.attachments.length && !m.html && <LinkCard text={m.text} />}
+          {m.poll ? <PollView m={m} /> : <>
+            {m.text && (big ? <BigEmoji text={m.text} /> : <div className="text">{linkify(m.text)}</div>)}
+            {m.text && !big && !m.attachments.length && !m.html && <LinkCard text={m.text} />}
+          </>}
           {onDetect && <DetectHint m={m} onDetect={onDetect} />}
           {m.html && <button className="mail-orig" onClick={() => openMail(m)}><Icon name="file" size={14} />{T('Original-E-Mail ansehen')}</button>}
           {m.translation && (() => {
