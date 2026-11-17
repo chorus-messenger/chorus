@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, type Chat, type Message, type Poll } from '../api';
 import { Icon } from './Icon';
 import { T } from '../i18n';
@@ -21,7 +21,10 @@ export function PollView({ m }: { m: Message }) {
   const [mine, setMine] = useState<number[] | null>(null);
   const [err, setErr] = useState('');
   const [who, setWho] = useState(false);
-  useEffect(() => setMine(null), [m.poll]);
+  // Mehrfaches schnelles Antippen nur einmal senden (jede Stimme geht bei Signal/WhatsApp an alle Mitglieder)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => { if (!timer.current) setMine(null); }, [m.poll]);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   const sel = mine ?? server;
   const { counts, voters } = tally(p);
   const max = Math.max(1, ...counts);
@@ -33,7 +36,12 @@ export function PollView({ m }: { m: Message }) {
     if (!canVote) return;
     const next = p.multi ? (sel.includes(i) ? sel.filter((x) => x !== i) : [...sel, i].sort()) : sel.includes(i) ? [] : [i];
     setMine(next); setErr('');
-    api.vote(m.id, next).catch((e: any) => { setMine(null); setErr(e?.message ?? String(e)); });
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      if (next.length === server.length && next.every((x) => server.includes(x))) { setMine(null); return; }
+      api.vote(m.id, next).catch((e: any) => { setMine(null); setErr(e?.message ?? String(e)); });
+    }, 900);
   };
 
   return (

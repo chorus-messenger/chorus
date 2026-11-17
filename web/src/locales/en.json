@@ -1176,6 +1176,7 @@
  "Frage": "Question",
  "Was möchtest du fragen?": "What do you want to ask?",
  "Antwortmöglichkeiten": "Options",
+ "Signal verlangt für dieses Gerät gerade eine Bestätigung gegen Spam und blockiert das Senden. Meist geht es nach einiger Zeit von selbst wieder.": "Signal currently requires an anti-spam confirmation for this device and blocks sending. It usually clears up by itself after a while.",
  "Antwort {0}": "Answer {0}",
  "Antwort entfernen": "Remove answer",
  "Jede Antwort darf nur einmal vorkommen": "Each answer may only appear once",

@@ -67,7 +67,7 @@ export class SignalAdapter implements Adapter {
     if (msg.id !== undefined && this.pending.has(msg.id)) {
       const p = this.pending.get(msg.id)!;
       this.pending.delete(msg.id);
-      if (msg.error) p.rej(new Error(msg.error.message ?? 'Signal-Fehler'));
+      if (msg.error) p.rej(new Error(signalError(msg.error)));
       else p.res(msg.result);
     } else if (msg.method === 'receive') {
       const env = msg.params?.envelope ?? msg.params?.result?.envelope;
@@ -575,3 +575,15 @@ export class SignalAdapter implements Adapter {
 
 export const signalFactory: AdapterFactory = ({ accountId, session, events }) =>
   new SignalAdapter(accountId, session, events, process.env.SIGNAL_CLI ?? 'signal-cli');
+
+/** Fehler von signal-cli verständlich machen. Rate-Limit: Signal lässt das Konto kurz nichts senden, ganzen Fehler ins Log */
+export function signalError(err: { message?: string; data?: unknown }): string {
+  const m = err.message ?? 'Signal-Fehler';
+  if (!/rate limit/i.test(m)) return m;
+  const raw = JSON.stringify(err);
+  console.warn('[signal] Rate-Limit beim Senden: ' + raw.replace(/\+?\d{6,}/g, '+…').slice(0, 2000));
+  if (/PROOF_REQUIRED|captcha|"token"/i.test(raw)) return 'Signal verlangt für dieses Gerät gerade eine Bestätigung gegen Spam und blockiert das Senden. Meist geht es nach einiger Zeit von selbst wieder.';
+  const secs = Math.max(0, ...[...raw.matchAll(/retryAfter(?:Seconds)?"?\s*:\s*(\d+)/gi)].map((x) => Number(x[1])));
+  const wait = secs > 90 ? `in etwa ${Math.ceil(secs / 60)} Minuten` : secs > 0 ? `in etwa ${secs} Sekunden` : 'in ein paar Minuten';
+  return `Signal bremst gerade: zu viele Nachrichten in kurzer Zeit. Bitte ${wait} erneut versuchen.`;
+}
