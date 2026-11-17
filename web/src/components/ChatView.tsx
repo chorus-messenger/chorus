@@ -13,7 +13,7 @@ import { Avatar } from './Rail';
 import { Icon } from './Icon';
 import { MessageBubble, albumable, previewOf } from './Message';
 import { Composer } from './Composer';
-import { EmojiPicker } from './EmojiPicker';
+import { EmojiPicker, sameEmoji, showEmoji } from './EmojiPicker';
 import { AiPanel } from './AiPanel';
 import { OrganizeSheet } from './OrganizeSheet';
 import { useExit } from '../useExit';
@@ -73,6 +73,14 @@ export function ChatView({ chat, account, messages, onBack, loadOlder, onPatchCh
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   const [menu, setMenu] = useState<{ m: Message; x: number; y: number; picker?: boolean } | null>(null);
+  // Erlaubte Reaktionen je Chat (Telegram-Gruppen schränken das ein); undefined = noch nicht geladen
+  const [, setAllowedTick] = useState(0);
+  const menuChat = menu?.m.chatId;
+  useEffect(() => {
+    if (!menuChat || allowedCache.has(menuChat)) return;
+    allowedCache.set(menuChat, null);
+    api.allowedReactions(menuChat).then((r) => { allowedCache.set(menuChat, r.allowed); setAllowedTick((t) => t + 1); }).catch(() => allowedCache.delete(menuChat));
+  }, [menuChat]);
   const [headMenu, setHeadMenu] = useState(false);
   // Notizen an mich: Lebensdauer neuer Notizen (gilt für alle Geräte)
   const notes = chat.network === 'notes';
@@ -440,15 +448,15 @@ export function ChatView({ chat, account, messages, onBack, loadOlder, onPatchCh
                 <button className="danger" onClick={() => { const m = menu.m; setMenu(null); guard(() => m.remoteId.startsWith('local-') ? api.discard(m.id) : api.remove(m.id, false)); }}><Icon name="trash" size={18} />{T('Löschen')}</button>
               </div>
             ) : menu.picker ? (
-              <EmojiPicker onPick={(e) => { react(menu.m, e); setMenu(null); }} />
+              <EmojiPicker only={allowedCache.get(menu.m.chatId) ?? undefined} onPick={(e) => { react(menu.m, e); setMenu(null); }} />
             ) : (<>
-              <div className="quick-reactions">
-                {QUICK_REACTIONS.map((e) => {
-                  const mine = menu.m.reactions.some((r) => r.fromMe && r.emoji === e);
+              {allowedCache.get(menu.m.chatId)?.length === 0 ? <div className="menu-note">{T('Reaktionen sind in diesem Chat ausgeschaltet.')}</div> : <div className="quick-reactions">
+                {quickFor(allowedCache.get(menu.m.chatId)).map((e) => {
+                  const mine = menu.m.reactions.some((r) => r.fromMe && sameEmoji(r.emoji, e));
                   return <button key={e} className={mine ? 'on' : ''} onClick={() => { react(menu.m, mine ? null : e); setMenu(null); }}>{e}</button>;
                 })}
                 <button className="more" onClick={() => setMenu({ ...menu, picker: true })} title="Weitere"><Icon name="plus" size={18} /></button>
-              </div>
+              </div>}
               <div className="menu-list">
                 <button onClick={() => { setReplyTo(menu.m); setEditing(null); setMenu(null); }}><Icon name="reply" size={18} />{T('Antworten')}</button>
                 {!menu.m.deleted && (menu.m.text || menu.m.attachments.length > 0) && <button onClick={() => { setForward(menu.m); setMenu(null); }}><Icon name="forward" size={18} />{T('Weiterleiten')}</button>}
@@ -507,6 +515,16 @@ const CATCHUP_MIN = 8;
 const quickSeen = new Map<string, string[]>();
 const quickDismissed = new Set<string>();
 const QUICK_MAX_AGE = 3 * 24 * 3600_000;
+
+/** chatId → erlaubte Reaktionen (null = alle) */
+const allowedCache = new Map<string, string[] | null>();
+/** Schnellreaktionen: nur erlaubte, bei Bedarf mit den ersten erlaubten aufgefüllt */
+function quickFor(allowed: string[] | null | undefined): string[] {
+  if (!allowed) return QUICK_REACTIONS;
+  const q = QUICK_REACTIONS.filter((e) => allowed.some((a) => sameEmoji(a, e)));
+  for (const a of allowed) { if (q.length >= QUICK_REACTIONS.length) break; if (!q.some((e) => sameEmoji(e, a))) q.push(showEmoji(a)); }
+  return q;
+}
 
 /** KI-Antwortvorschläge über dem Eingabefeld: drei kurze Antworten auf die neueste eingehende Nachricht.
  *  Geladen wird nur, wenn die letzte Nachricht vom Gegenüber kommt und frisch ist, kurz verzögert (mehrere Nachrichten am Stück = eine Anfrage). */

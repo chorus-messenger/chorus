@@ -282,7 +282,7 @@ export class TelegramAdapter implements Adapter {
     }));
     if (!emoji) { await send(null); return; }
     // Telegram kennt Reaktionen ohne Variation Selector (z. B. „❤“ statt „❤️“)
-    const allowed = await this.allowedReactions(chat, peer).catch(() => null);
+    const allowed = await this.reactionsFor(chat, peer).catch(() => null);
     const pick = matchReaction(emoji, allowed ?? undefined);
     if (allowed && !pick) throw reactionError(emoji, allowed);
     try {
@@ -297,11 +297,15 @@ export class TelegramAdapter implements Adapter {
     }
   }
 
+  async allowedReactions(chat: string): Promise<string[] | null> {
+    return this.reactionsFor(chat, await this.peer(chat));
+  }
+
   private reactCache = new Map<string, { at: number; list: string[] | null }>();
   private globalReactions: { at: number; list: string[] } | null = null;
 
   /** Erlaubte Standard-Reaktionen des Chats (null = alle Standard-Reaktionen) */
-  private async allowedReactions(chat: string, peer: Api.TypeInputPeer): Promise<string[] | null> {
+  private async reactionsFor(chat: string, peer: Api.TypeInputPeer): Promise<string[] | null> {
     const hit = this.reactCache.get(chat);
     if (hit && Date.now() - hit.at < 10 * 60_000) return hit.list;
     let avail: Api.TypeChatReactions | undefined;

@@ -198,6 +198,7 @@ export const api = {
   input: (id: string, field: string, value: string) => req('POST', `/api/accounts/${id}/input`, { field, value }),
 
   chats: () => req<Chat[]>('GET', '/api/chats'),
+  allowedReactions: (chatId: string) => req<{ allowed: string[] | null }>('GET', `/api/chats/${enc(chatId)}/reactions`),
   deleteChat: (id: string) => req('DELETE', `/api/chats/${enc(id)}`),
   patchChat: (id: string, patch: Partial<Pick<Chat, 'pinned' | 'muted' | 'archived' | 'alias' | 'note'>>) => req<Chat>('PATCH', `/api/chats/${enc(id)}`, patch),
   markUnread: (id: string) => req<Chat>('POST', `/api/chats/${enc(id)}/unread`),

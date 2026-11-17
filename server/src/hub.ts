@@ -384,6 +384,14 @@ export class Hub {
     await this.react(m.id, '🤖').catch((e) => console.error('[bot-reaktion]', e?.message ?? e));
   }
 
+  /** Erlaubte Reaktionen eines Chats (null = beliebige) */
+  async allowedReactions(chatId: string): Promise<string[] | null> {
+    const chat = this.chatOrThrow(chatId);
+    const a = this.adapterFor(chat);
+    if (!a.allowedReactions) return null;
+    try { return await a.allowedReactions(chat.remoteId); } catch { return null; }
+  }
+
   async react(messageId: string, emoji: string | null) {
     const msg = this.store.getMessage(messageId);
     if (!msg) throw new Error('Nachricht nicht gefunden');
