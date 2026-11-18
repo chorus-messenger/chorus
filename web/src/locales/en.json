@@ -1176,7 +1176,6 @@
  "Frage": "Question",
  "Was möchtest du fragen?": "What do you want to ask?",
  "Antwortmöglichkeiten": "Options",
- "Signal verlangt für dieses Gerät gerade eine Bestätigung gegen Spam und blockiert das Senden. Meist geht es nach einiger Zeit von selbst wieder.": "Signal currently requires an anti-spam confirmation for this device and blocks sending. It usually clears up by itself after a while.",
  "Antwort {0}": "Answer {0}",
  "Antwort entfernen": "Remove answer",
  "Jede Antwort darf nur einmal vorkommen": "Each answer may only appear once",
@@ -1190,5 +1189,17 @@
  "Die Umfrage ist beendet": "The poll is closed",
  "Abstimmen geht bei diesem Messenger nicht": "Voting is not possible with this messenger",
  "Umfrage bei Telegram nicht gefunden": "Poll not found on Telegram",
- "Für diese Umfrage fehlt Chorus der Schlüssel. Bitte am Handy abstimmen.": "Chorus is missing the key for this poll. Please vote on your phone."
+ "Für diese Umfrage fehlt Chorus der Schlüssel. Bitte am Handy abstimmen.": "Chorus is missing the key for this poll. Please vote on your phone.",
+ "Signal verlangt eine Bestätigung gegen Spam. Einstellungen → Signal → „Spam-Bestätigung“ öffnen und dort das kurze Rätsel lösen.": "Signal requires an anti-spam confirmation. Open Settings → Signal → “Spam confirmation” and solve the short puzzle there.",
+ "Spam-Bestätigung": "Spam confirmation",
+ "Bestätigt. Senden sollte jetzt wieder gehen.": "Confirmed. Sending should work again now.",
+ "Signal hat das Senden für Chorus gesperrt, bis du ein kurzes Rätsel löst.": "Signal has blocked sending from Chorus until you solve a short puzzle.",
+ "Signal verlangt das nur, wenn Senden mit „Bestätigung gegen Spam“ scheitert. Dann hier lösen. Wird gerade keine verlangt, schick zuerst eine Nachricht, damit Signal sie anfordert.": "Signal only asks for this when sending fails with an anti-spam confirmation. Solve it here then. If none is requested right now, send a message first so Signal asks for it.",
+ "Rätsel öffnen und lösen (am besten im selben WLAN wie der Chorus-Server):": "Open and solve the puzzle (ideally on the same Wi-Fi as the Chorus server):",
+ "Danach erscheint „Open Signal“. Den Link dahinter kopieren (lange drücken bzw. Rechtsklick → Link kopieren), er beginnt mit signalcaptcha://": "Then “Open Signal” appears. Copy the link behind it (long press or right-click → copy link); it starts with signalcaptcha://",
+ "Hier einfügen und bestätigen:": "Paste it here and confirm:",
+ "Bestätigen": "Confirm",
+ "Signal verlangt gerade keine Bestätigung": "Signal is not asking for a confirmation right now",
+ "Bitte den kopierten Link einfügen": "Please paste the copied link",
+ "Signal hat die Bestätigung abgelehnt. Bitte das Rätsel neu lösen (im selben WLAN wie der Server) und den neuen Link sofort einfügen.": "Signal rejected the confirmation. Please solve the puzzle again (on the same Wi-Fi as the server) and paste the new link right away."
 }

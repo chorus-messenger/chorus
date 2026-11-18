@@ -329,12 +329,44 @@ function AccountPage({ acc, onBack }: { acc: Account; onBack: () => void }) {
         <Row tile={<Tile color="#007aff" icon="refresh" />} title={T('Neu verbinden')} chevron={false} onClick={() => api.restartAccount(acc.id)} />
       </div>
       {acc.network === 'email' && <div className="ios-card pad"><EmailSettings id={acc.id} /></div>}
+      {acc.network === 'signal' && <div className="ios-card pad"><SignalChallenge acc={acc} /></div>}
       <div className="ios-card">
         <Row title={T('Messenger trennen')} danger chevron={false}
           onClick={async () => { if (confirm(T('{0} wirklich trennen? Die Chats werden aus Chorus gelöscht (nicht auf dem Handy).', acc.label))) { await api.removeAccount(acc.id); onBack(); } }} />
       </div>
       <p className="ios-foot">{T('Beim Trennen werden nur die Daten in Chorus gelöscht. Auf deinem Handy bleibt alles, wie es ist.')}</p>
     </>
+  );
+}
+
+/** Signal: Spam-Bestätigung (Captcha) einreichen, wenn Signal das Senden sperrt */
+function SignalChallenge({ acc }: { acc: Account }) {
+  const [v, setV] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [open, setOpen] = useState(false);
+  const need = !!acc.status.challenge;
+  if (!need && !open && !msg) return <button className="link-btn" onClick={() => setOpen(true)}>{T('Spam-Bestätigung')}</button>;
+  const send = async () => {
+    setBusy(true); setMsg('');
+    try { await api.input(acc.id, 'captcha', v); setV(''); setMsg(T('Bestätigt. Senden sollte jetzt wieder gehen.')); }
+    catch (e: any) { setMsg(serverText(e?.message ?? String(e))); }
+    setBusy(false);
+  };
+  return (
+    <div className="sig-challenge">
+      <b>{T('Spam-Bestätigung')}</b>
+      {need ? <p>{T('Signal hat das Senden für Chorus gesperrt, bis du ein kurzes Rätsel löst.')}</p>
+        : <p>{T('Signal verlangt das nur, wenn Senden mit „Bestätigung gegen Spam“ scheitert. Dann hier lösen. Wird gerade keine verlangt, schick zuerst eine Nachricht, damit Signal sie anfordert.')}</p>}
+      <ol>
+        <li>{T('Rätsel öffnen und lösen (am besten im selben WLAN wie der Chorus-Server):')} <a href="https://signalcaptchas.org/challenge/generate.html" target="_blank" rel="noreferrer">signalcaptchas.org</a></li>
+        <li>{T('Danach erscheint „Open Signal“. Den Link dahinter kopieren (lange drücken bzw. Rechtsklick → Link kopieren), er beginnt mit signalcaptcha://')}</li>
+        <li>{T('Hier einfügen und bestätigen:')}</li>
+      </ol>
+      <input value={v} onChange={(e) => setV(e.target.value)} placeholder="signalcaptcha://…" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+      <button className="btn primary wide" disabled={busy || !v.trim() || !need} onClick={send}>{busy ? T('Einen Moment …') : T('Bestätigen')}</button>
+      {msg && <small>{msg}</small>}
+    </div>
   );
 }
 

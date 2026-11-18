@@ -20,6 +20,8 @@ export interface AccountStatus {
   message?: string;
   /** eigene Nummer bzw. Benutzername bei diesem Messenger (wenn verbunden) */
   self?: string;
+  /** Signal: Senden gesperrt, bis eine Spam-Bestätigung (Captcha) eingereicht ist (input-Feld „captcha“) */
+  challenge?: boolean;
 }
 
 export interface Account {
