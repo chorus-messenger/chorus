@@ -46,7 +46,24 @@ export class SignalAdapter implements Adapter {
     this.dir = join(secureTmpDir(), `signal-${accountId}`);
   }
 
-  async input() { throw new Error('Signal wird per QR-Code gekoppelt'); }
+  /** Spam-Bestätigung: Captcha von signalcaptchas.org einreichen (Feld „captcha“, Link signalcaptcha://…) */
+  async input(field: string, value: string) {
+    if (field !== 'captcha') throw new Error('Signal wird per QR-Code gekoppelt');
+    if (!this.challenge) throw new Error('Signal verlangt gerade keine Bestätigung');
+    const captcha = value.trim().replace(/^signalcaptcha:\/\//, '');
+    if (!captcha) throw new Error('Bitte den kopierten Link einfügen');
+    try {
+      await this.call('submitRateLimitChallenge', { challenge: this.challenge, captcha });
+    } catch (e: any) {
+      if (/rejected|outdated/i.test(String(e?.message))) throw new Error('Signal hat die Bestätigung abgelehnt. Bitte das Rätsel neu lösen (im selben WLAN wie der Server) und den neuen Link sofort einfügen.');
+      throw e;
+    }
+    this.challenge = null;
+    this.ev.log('Spam-Bestätigung angenommen');
+    this.ev.status({ state: 'connected', self: this.account && this.account.startsWith('+') ? this.account : undefined });
+  }
+  /** Token aus dem letzten „Proof required“-Fehler (für submitRateLimitChallenge) */
+  private challenge: string | null = null;
 
   // ---------- JSON-RPC ----------
   private call<T = any>(method: string, params: Record<string, unknown> = {}, timeoutMs = 60_000): Promise<T> {
@@ -67,7 +84,14 @@ export class SignalAdapter implements Adapter {
     if (msg.id !== undefined && this.pending.has(msg.id)) {
       const p = this.pending.get(msg.id)!;
       this.pending.delete(msg.id);
-      if (msg.error) p.rej(new Error(signalError(msg.error)));
+      if (msg.error) {
+        const tok = challengeToken(msg.error);
+        if (tok && tok !== this.challenge) {
+          this.challenge = tok;
+          this.ev.status({ state: 'connected', self: this.account && this.account.startsWith('+') ? this.account : undefined, challenge: true });
+        }
+        p.rej(new Error(signalError(msg.error)));
+      }
       else p.res(msg.result);
     } else if (msg.method === 'receive') {
       const env = msg.params?.envelope ?? msg.params?.result?.envelope;
@@ -582,8 +606,15 @@ export function signalError(err: { message?: string; data?: unknown }): string {
   if (!/rate limit/i.test(m)) return m;
   const raw = JSON.stringify(err);
   console.warn('[signal] Rate-Limit beim Senden: ' + raw.replace(/\+?\d{6,}/g, '+…').slice(0, 2000));
-  if (/PROOF_REQUIRED|captcha|"token"/i.test(raw)) return 'Signal verlangt für dieses Gerät gerade eine Bestätigung gegen Spam und blockiert das Senden. Meist geht es nach einiger Zeit von selbst wieder.';
+  if (/PROOF_REQUIRED|captcha|"token"/i.test(raw)) return 'Signal verlangt eine Bestätigung gegen Spam. Einstellungen → Signal → „Spam-Bestätigung“ öffnen und dort das kurze Rätsel lösen.';
   const secs = Math.max(0, ...[...raw.matchAll(/retryAfter(?:Seconds)?"?\s*:\s*(\d+)/gi)].map((x) => Number(x[1])));
   const wait = secs > 90 ? `in etwa ${Math.ceil(secs / 60)} Minuten` : secs > 0 ? `in etwa ${secs} Sekunden` : 'in ein paar Minuten';
   return `Signal bremst gerade: zu viele Nachrichten in kurzer Zeit. Bitte ${wait} erneut versuchen.`;
+}
+
+/** Challenge-Token aus einem PROOF_REQUIRED-Fehler von signal-cli */
+export function challengeToken(err: unknown): string | null {
+  const raw = JSON.stringify(err ?? '');
+  if (!/PROOF_REQUIRED|proof required|captcha/i.test(raw)) return null;
+  return raw.match(/"token"\s*:\s*"([^"]+)"/)?.[1] ?? raw.match(/challenge token \\?"([^"\\]+)/)?.[1] ?? null;
 }

@@ -1403,3 +1403,8 @@ html.shape-compact .fab { width: 50px; height: 50px; border-radius: 15px; }
 .rs-emoji { font-size: 22px; line-height: 1; }
 .rs-mine { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .react-sheet .mi-label small { display: block; margin-left: 0; font-size: 12px; }
+
+.sig-challenge { display: grid; gap: 8px; }
+.sig-challenge p, .sig-challenge ol { margin: 0; font-size: 14px; }
+.sig-challenge ol { padding-left: 20px; display: grid; gap: 4px; }
+.sig-challenge input { width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; font-size: 13px; }

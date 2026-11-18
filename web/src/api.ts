@@ -9,6 +9,8 @@ export interface AccountStatus {
   code?: string;
   message?: string;
   self?: string;
+  /** Signal: Spam-Bestätigung (Captcha) nötig, sonst kann Chorus nichts senden */
+  challenge?: boolean;
 }
 export interface Account { id: string; network: Network; label: string; status: AccountStatus; createdAt: number }
 export interface Chat {
