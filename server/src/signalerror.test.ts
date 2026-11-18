@@ -13,4 +13,6 @@ test('Challenge-Token finden', () => {
   assert.equal(challengeToken({ message: 'x', data: { response: { results: [{ type: 'PROOF_REQUIRED_FAILURE', token: 'abc-123', retryAfterSeconds: 86400 }] } } }), 'abc-123');
   assert.equal(challengeToken({ message: 'CAPTCHA proof required for sending to "x", available options "[CAPTCHA]" with challenge token "tok-9", or wait "60" seconds.' }), 'tok-9');
   assert.equal(challengeToken({ message: 'Failed to send message due to rate limiting' }), null);
+  // So liefert signal-cli es wirklich: Typ RATE_LIMIT_FAILURE, nur das Feld token verrät die Spam-Bestätigung
+  assert.equal(challengeToken({ code: -5, message: 'Failed to send message due to rate limiting', data: { response: { timestamp: 1, results: [{ recipientAddress: { uuid: 'u' }, type: 'RATE_LIMIT_FAILURE', token: '5fad97ac-7d06', retryAfterSeconds: 86400 }] } } }), '5fad97ac-7d06');
 });
