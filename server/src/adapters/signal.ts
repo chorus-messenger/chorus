@@ -432,7 +432,11 @@ export class SignalAdapter implements Adapter {
   }
 
   private target(chat: string): Record<string, unknown> {
-    return chat.startsWith('g:') ? { groupId: chat.slice(2) } : { recipient: [chat] };
+    if (chat.startsWith('g:')) return { groupId: chat.slice(2) };
+    // Chat mit mir selbst („Notiz an mich“): als Note-to-Self senden. Als normaler Empfänger behandelt Signal das
+    // wie eine Nachricht an fremde Geräte und verlangt schnell eine Spam-Bestätigung
+    if (chat === this.me || chat === this.account) return { noteToSelf: true };
+    return { recipient: [chat] };
   }
   private split(remoteId: string) {
     const i = remoteId.indexOf(':');
