@@ -612,9 +612,9 @@ export function signalError(err: { message?: string; data?: unknown }): string {
   return `Signal bremst gerade: zu viele Nachrichten in kurzer Zeit. Bitte ${wait} erneut versuchen.`;
 }
 
-/** Challenge-Token aus einem PROOF_REQUIRED-Fehler von signal-cli */
+/** Challenge-Token aus einem Proof-required-Fehler von signal-cli */
 export function challengeToken(err: unknown): string | null {
   const raw = JSON.stringify(err ?? '');
-  if (!/PROOF_REQUIRED|proof required|captcha/i.test(raw)) return null;
+  // signal-cli meldet das als RATE_LIMIT_FAILURE mit Feld „token“ (ohne „PROOF_REQUIRED“ im Text)
   return raw.match(/"token"\s*:\s*"([^"]+)"/)?.[1] ?? raw.match(/challenge token \\?"([^"\\]+)/)?.[1] ?? null;
 }
