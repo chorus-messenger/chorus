@@ -195,7 +195,7 @@ export const api = {
   totpEnable: (code: string) => req<{ ok: true; trust?: string }>('POST', '/api/2fa/enable', { code }),
   totpDisable: (code: string) => req<{ ok: true }>('POST', '/api/2fa/disable', { code }),
   recover: (profileId: string, code: string, salt: string, key: string) => req('POST', '/api/vault/recover', { profileId, code, salt, key }),
-  changePassword: (salt: string, key: string) => req('POST', '/api/vault/password', { salt, key }),
+  changePassword: (salt: string, key: string, oldKey: string) => req('POST', '/api/vault/password', { salt, key, oldKey }),
   setComfort: (on: boolean) => req<{ comfort: boolean }>('POST', '/api/vault/comfort', { on }),
   logout: () => req('POST', '/api/logout'),
 

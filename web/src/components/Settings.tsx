@@ -62,7 +62,7 @@ export function Settings({ server, accounts, onClose, onAdd, onLocked, onProfile
   const pid = me.id;
   const st = useStorage();
   const storeVal = [st?.nextcloud.enabled && 'Nextcloud', st?.immich.enabled && 'Immich'].filter(Boolean).join(', ');
-  const [pw, setPw] = useState({ a: '', b: '', msg: '' });
+  const [pw, setPw] = useState({ old: '', a: '', b: '', msg: '' });
   const [page, setPage] = useState<Page | null>(null);
   const [sync, setSync] = useState<'idle' | 'busy' | 'fail'>('idle');
   const [lastSync, setLastSync] = useState(() => Number(localStorage.getItem('inbox:lastSync')) || 0);
@@ -102,11 +102,19 @@ export function Settings({ server, accounts, onClose, onAdd, onLocked, onProfile
     e.preventDefault();
     if (pw.a.length < 8) return setPw({ ...pw, msg: T('Mindestens 8 Zeichen.') });
     if (pw.a !== pw.b) return setPw({ ...pw, msg: T('Passwörter stimmen nicht überein.') });
-    const salt = newSalt();
-    const key = await deriveKey(pw.a, salt, 600_000);
-    await api.changePassword(salt, key);
-    if (await keyStore.get(pid)) await keyStore.set(pid, key);
-    setPw({ a: '', b: '', msg: T('Passwort geändert.') });
+    try {
+      // Aktuelles Passwort mit den gespeicherten Parametern ableiten, der Server prüft es
+      const kdf = (await api.state()).profiles.find((p) => p.id === pid)?.kdf;
+      if (!kdf) throw new Error(T('Profil nicht gefunden'));
+      const oldKey = await deriveKey(pw.old, kdf.salt, kdf.iterations);
+      const salt = newSalt();
+      const key = await deriveKey(pw.a, salt, 600_000);
+      await api.changePassword(salt, key, oldKey);
+      if (await keyStore.get(pid)) await keyStore.set(pid, key);
+      setPw({ old: '', a: '', b: '', msg: T('Passwort geändert. Andere Geräte müssen sich neu anmelden.') });
+    } catch (err: any) {
+      setPw((x) => ({ ...x, msg: err?.message || String(err) }));
+    }
   };
   const logout = async () => { clearSnapshot(); window.caches?.delete('chorus-media-v1').catch(() => {}); await keyStore.clear(pid); await api.logout(); onLocked(); };
 
@@ -167,10 +175,11 @@ export function Settings({ server, accounts, onClose, onAdd, onLocked, onProfile
           </div>
           <p className="ios-caption">{T('Passwort ändern')}</p>
           <form className="ios-card pad stack" onSubmit={changePw}>
+            <input className="input" type="password" placeholder={T('Aktuelles Passwort')} value={pw.old} onChange={(e) => setPw({ ...pw, old: e.target.value })} autoComplete="current-password" />
             <input className="input" type="password" placeholder={T('Neues Passwort')} value={pw.a} onChange={(e) => setPw({ ...pw, a: e.target.value })} autoComplete="new-password" />
             <input className="input" type="password" placeholder={T('Wiederholen')} value={pw.b} onChange={(e) => setPw({ ...pw, b: e.target.value })} autoComplete="new-password" />
             {pw.msg && <small>{pw.msg}</small>}
-            <button className="btn" disabled={!pw.a}>{T('Ändern')}</button>
+            <button className="btn" disabled={!pw.a || !pw.old}>{T('Ändern')}</button>
           </form>
         </>
       );

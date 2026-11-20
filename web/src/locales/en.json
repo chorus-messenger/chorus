@@ -1201,5 +1201,9 @@
  "Bestätigen": "Confirm",
  "Signal verlangt gerade keine Bestätigung": "Signal is not asking for a confirmation right now",
  "Bitte den kopierten Link einfügen": "Please paste the copied link",
- "Signal hat die Bestätigung abgelehnt. Bitte das Rätsel neu lösen (im selben WLAN wie der Server) und den neuen Link sofort einfügen.": "Signal rejected the confirmation. Please solve the puzzle again (on the same Wi-Fi as the server) and paste the new link right away."
+ "Signal hat die Bestätigung abgelehnt. Bitte das Rätsel neu lösen (im selben WLAN wie der Server) und den neuen Link sofort einfügen.": "Signal rejected the confirmation. Please solve the puzzle again (on the same Wi-Fi as the server) and paste the new link right away.",
+ "Aktuelles Passwort": "Current password",
+ "Aktuelles Passwort falsch": "Current password is wrong",
+ "Passwort geändert. Andere Geräte müssen sich neu anmelden.": "Password changed. Other devices need to sign in again.",
+ "Profil nicht gefunden": "Profile not found"
 }
