@@ -107,11 +107,14 @@ function ctxOf(p: ProfileEntry): Ctx {
 }
 /** Sitzung → Profil */
 const sessions = new Map<string, string>();
+/** Sitzung → zuletzt benutzt. Unbenutzte Sitzungen laufen nach 30 Tagen ab (vorher galten sie bis zum nächsten Neustart). */
+const sessionSeen = new Map<string, number>();
+const SESSION_IDLE = 30 * 86400_000;
 /** Live-Verbindung → Sitzung, damit eine beendete Sitzung auch ihren offenen Live-Kanal verliert */
 const socketSid = new WeakMap<import('ws').WebSocket, string>();
 /** Sitzungen eines Profils beenden (außer `keep`) und deren Live-Verbindungen schließen */
 function dropSessions(profileId: string, keep?: string) {
-  for (const [sid, pid] of [...sessions]) if (pid === profileId && sid !== keep) sessions.delete(sid);
+  for (const [sid, pid] of [...sessions]) if (pid === profileId && sid !== keep) { sessions.delete(sid); sessionSeen.delete(sid); }
   const c = ctxs.get(profileId);
   if (c) for (const ws of c.sockets) { const sid = socketSid.get(ws); if (sid && !sessions.has(sid)) ws.close(4401, 'Abgemeldet'); }
 }
@@ -156,6 +159,7 @@ app.addHook('onSend', async (_req, reply, payload) => {
 function newSession(reply: FastifyReply, req: FastifyRequest, profileId: string, keep = false) {
   const sid = randomBytes(32).toString('base64url');
   sessions.set(sid, profileId);
+  sessionSeen.set(sid, Date.now());
   reply.setCookie('sid', sid, { path: '/', httpOnly: true, sameSite: 'strict', secure: req.protocol === 'https', ...(keep ? { maxAge: 30 * 86400 } : {}) });
 }
 const isHttps = (req: FastifyRequest) => req.protocol === 'https';
@@ -183,6 +187,13 @@ async function guard(req: FastifyRequest, reply: FastifyReply): Promise<boolean>
   if (g > 20) await new Promise((r) => setTimeout(r, Math.min(10_000, (g - 20) * 250)));
   return true;
 }
+// Aufräumen: abgelaufene Sitzungen, Sperren und Fehlversuche (sonst wachsen die Listen bis zum Neustart)
+setInterval(() => {
+  const now = Date.now();
+  for (const [sid, t] of sessionSeen) if (now - t > SESSION_IDLE) { sessionSeen.delete(sid); sessions.delete(sid); }
+  for (const [ip, until] of blocked) if (until < now) blocked.delete(ip);
+  for (const k of [...failures.keys()]) { const r = recent(k); if (r.length) failures.set(k, r); else failures.delete(k); }
+}, 3600_000).unref();
 function failed(req: FastifyRequest) {
   const now = Date.now();
   const mine = [...recent(req.ip), now];
@@ -212,7 +223,13 @@ function checkTotp(c: Ctx, code: unknown): boolean {
 
 /** Angemeldetes Profil dieser Anfrage (oder null) */
 function authed(req: FastifyRequest): Ctx | null {
-  const pid = req.cookies.sid ? sessions.get(req.cookies.sid) : undefined;
+  const sid = req.cookies.sid;
+  let pid = sid ? sessions.get(sid) : undefined;
+  if (sid && pid) {
+    const now = Date.now(), seen = sessionSeen.get(sid) ?? now;
+    if (now - seen > SESSION_IDLE) { sessions.delete(sid); sessionSeen.delete(sid); pid = undefined; }
+    else if (now - seen > 60_000 || !sessionSeen.has(sid)) sessionSeen.set(sid, now);
+  }
   const p = registry.get(pid);
   if (!p) return null;
   const c = ctxOf(p);
@@ -311,7 +328,7 @@ app.get('/api/profiles/:id/avatar', async (req, reply) => {
 
 app.post('/api/logout', async (req, reply) => {
   const pid = req.cookies.sid ? sessions.get(req.cookies.sid) : undefined;
-  if (req.cookies.sid) sessions.delete(req.cookies.sid);
+  if (req.cookies.sid) { sessions.delete(req.cookies.sid); sessionSeen.delete(req.cookies.sid); }
   if (pid) dropSessions(pid, req.cookies.sid); // übrige Sitzungen bleiben, nur der Live-Kanal dieser Sitzung geht zu
   reply.clearCookie('sid', { path: '/' });
   return { ok: true };
