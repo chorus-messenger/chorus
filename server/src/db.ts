@@ -412,6 +412,14 @@ export class Store {
     for (const a of m.attachments) if (a.fileId) this.deleteFile(a.fileId);
     this.removeMessage(id);
   }
+  /** Gespeicherte Anhänge einer Nachricht löschen, sofern keine andere Nachricht dieselbe Datei nutzt */
+  dropFilesOf(m: Message) {
+    for (const a of m.attachments) {
+      if (!a.fileId) continue;
+      const other = this.db.prepare('SELECT 1 FROM messages WHERE id<>? AND attachments LIKE ? LIMIT 1').get(m.id, `%${a.fileId}%`);
+      if (!other) this.deleteFile(a.fileId);
+    }
+  }
   setExpiry(id: string, at: number | null) { this.db.prepare('UPDATE messages SET expires_at=? WHERE id=?').run(at, id); return this.getMessage(id); }
   expiredMessages(now: number): { id: string; chatId: string }[] {
     return this.db.prepare('SELECT id, chat_id AS chatId FROM messages WHERE expires_at IS NOT NULL AND expires_at<=? LIMIT 500').all(now) as { id: string; chatId: string }[];

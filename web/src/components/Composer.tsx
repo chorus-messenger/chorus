@@ -1,7 +1,7 @@
 import { haptic } from '../haptics';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { api, type Chat, type Message } from '../api';
+import { api, ApiError, type Chat, type Message } from '../api';
 import { duration } from '../util';
 import { Icon } from './Icon';
 import { EmojiPicker } from './EmojiPicker';
@@ -213,7 +213,11 @@ export function Composer({ chat, onPickLang, draftId, serverDraft, placeholder, 
     const r = replyTo?.remoteId;
     const translate = canTr && !noTr;
     haptic(); setText(''); setNoTr(false); onSent(); armRise();
-    try { await api.send(chat.id, t, r, translate); } catch (e: any) { onError(e.message); }
+    try { await api.send(chat.id, t, r, translate); } catch (e: any) {
+      // Steht noch keine „fehlgeschlagen“-Blase im Chat (offline, Übersetzung gescheitert, Konto getrennt), Text zurückholen statt ihn zu verlieren
+      if (!(e instanceof ApiError && e.data?.shown)) setText((cur) => cur || t);
+      onError(e.message);
+    }
   };
 
   /** Zeitversetzt senden */

@@ -332,6 +332,8 @@ export class Hub {
       const msg = this.store.patchMessage(tmp.id, { status: 'failed' });
       // Grund nur live mitschicken (nicht gespeichert): das Menü der Nachricht zeigt ihn an
       if (msg) this.emit({ type: 'message', message: { ...msg, error } });
+      // Die App weiß so, dass die Blase mit „fehlgeschlagen“ schon im Chat steht und der Text nicht verloren ist
+      if (e && typeof e === 'object') e.shown = true;
       throw e;
     }
   }
@@ -362,7 +364,8 @@ export class Hub {
   discard(messageId: string) {
     const msg = this.store.getMessage(messageId);
     if (!msg || !msg.fromMe || !msg.remoteId.startsWith('local-')) throw Object.assign(new Error('Nur nicht gesendete Nachrichten können verworfen werden'), { statusCode: 400 });
-    this.store.removeMessage(msg.id);
+    // Hochgeladene Datei gleich mit löschen, sonst bleibt sie verschlüsselt, aber ungenutzt im Speicher liegen
+    this.store.purgeMessage(msg.id);
     this.emit({ type: 'message_removed', id: msg.id, chatId: msg.chatId });
   }
 
@@ -467,6 +470,8 @@ export class Hub {
   async edit(messageId: string, text: string) {
     const msg = this.store.getMessage(messageId);
     if (!msg || !msg.fromMe) throw new Error('Nur eigene Nachrichten können bearbeitet werden');
+    if (msg.deleted || msg.remoteId.startsWith('local-')) throw Object.assign(new Error('Diese Nachricht kann nicht bearbeitet werden'), { statusCode: 400 });
+    if (!text.trim()) throw Object.assign(new Error('Leere Nachricht'), { statusCode: 400 });
     const chat = this.chatOrThrow(msg.chatId);
     await this.adapterFor(chat).edit(chat.remoteId, msg.remoteId, text);
     const m = this.store.patchMessage(messageId, { text, edited: true });
@@ -480,6 +485,8 @@ export class Hub {
     if (chat.network === 'notes') return this.purge([msg.id]); // Notizen: ganz weg statt „Nachricht gelöscht“
     if (!msg.remoteId.startsWith('local-') && !msg.deleted) await this.adapterFor(chat).delete(chat.remoteId, msg.remoteId, forEveryone);
     const m = this.store.patchMessage(messageId, { deleted: true, text: '', attachments: [] });
+    // Selbst gelöscht: auch die gespeicherten Fotos/Dateien entfernen (vorher blieben sie für immer im Speicher)
+    this.store.dropFilesOf(msg);
     if (m) this.emit({ type: 'message', message: m });
   }
 
