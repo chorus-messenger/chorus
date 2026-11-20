@@ -346,18 +346,25 @@ function Main({ server, live, snap, onLocked, onRefresh }: { server: ServerState
         return next === cur ? m : new Map(m).set(active, next); // unverändert: nicht neu zeichnen
       });
       if (ms.length < 20) api.history(active).catch(() => {});
-    });
+    }).catch(() => { loaded.current.delete(active); }); // offline: beim nächsten Öffnen erneut laden statt still leer zu bleiben
     markReadNow(active);
     return () => { cancelled = true; };
   }, [active, live]);
 
   const loadOlderOne = useCallback(async (id: string) => {
     const list = messages.get(id) ?? [];
+    // Ältere Nachrichten vorn anfügen, ohne Doppelte: Feuert das Nachladen zweimal kurz nacheinander (Scrollen), kam sonst derselbe Block doppelt in den Chat
+    const prepend = (older: Message[]) => setMessages((m) => {
+      const cur = m.get(id) ?? [];
+      const have = new Set(cur.map((x) => x.id));
+      const add = older.filter((x) => !have.has(x.id));
+      return add.length ? new Map(m).set(id, [...add, ...cur]) : m;
+    });
     const older = await api.messages(id, list[0]?.ts);
-    if (older.length) { setMessages((m) => new Map(m).set(id, [...older, ...(m.get(id) ?? [])])); return true; }
+    if (older.length) { prepend(older); return true; }
     await api.history(id).catch(() => {});
     const again = await api.messages(id, list[0]?.ts);
-    if (again.length) setMessages((m) => new Map(m).set(id, [...again, ...(m.get(id) ?? [])]));
+    if (again.length) prepend(again);
     return again.length > 0;
   }, [messages]);
   const loadOlder = useCallback(async () => {

@@ -21,3 +21,15 @@ Drei Prüfrunden vom 20.11.2026. Pro Runde: was aufgefallen ist, wie schwer, wie
 | 2.3 | **Selbst gelöschte Fotos/Dateien blieben für immer im Speicher.** Löschen leerte nur die Anhangsliste der Nachricht, die verschlüsselte Datei samt Vorschau blieb liegen. | mittel | Beim Löschen werden die Dateien mit entfernt (nur wenn keine andere Nachricht sie nutzt). |
 | 2.4 | Gleiches beim **Verwerfen** einer nie gesendeten Nachricht: Die hochgeladene Datei blieb liegen. | niedrig | Verwerfen löscht Nachricht samt Datei. |
 | 2.5 | Bearbeiten erlaubte leeren Text sowie gelöschte oder noch nicht gesendete Nachrichten (führte zu unklaren Fehlern beim Messenger). | niedrig | Server lehnt das mit klarer Meldung ab. |
+
+## Runde 3: Leistung und Aufräumen
+
+| # | Fund | Schwere | Behoben durch |
+|---|------|---------|---------------|
+| 3.1 | **Jede Datenbankabfrage wurde bei jedem Aufruf neu übersetzt** (86 Stellen, darunter Chatliste, Nachrichten laden, Nachricht holen, die ständig laufen). Kostet bei SQLCipher spürbar CPU. | mittel | Vorbereitete Abfragen werden zwischengespeichert und wiederverwendet (höchstens 300 Varianten). |
+| 3.2 | **Sitzungen liefen nie ab**: Eine einmal angemeldete Sitzung galt serverseitig bis zum nächsten Neustart, egal wie lange unbenutzt. | mittel | Unbenutzte Sitzungen laufen nach 30 Tagen ab. |
+| 3.3 | Sperrliste und Fehlversuche der Login-Bremse wurden nie aufgeräumt (wuchsen bis zum Neustart). | niedrig | Stündliches Aufräumen von Sitzungen, Sperren und alten Fehlversuchen. |
+| 3.4 | **Ältere Nachrichten konnten doppelt im Chat erscheinen**, wenn das Nachladen beim Hochscrollen zweimal kurz nacheinander auslöste. | mittel | Beim Voranstellen werden schon vorhandene Nachrichten übersprungen. |
+| 3.5 | Schlug das Laden eines Chats fehl (kurz offline), blieb er still leer und wurde erst nach einem App-Neustart wieder geladen. | niedrig | Fehler wird abgefangen, beim nächsten Öffnen wird neu geladen. |
+
+Geprüft wurde jeweils: Typprüfung Server und Web, 55 Server-Tests, Web-Build, ein kurzer Serverstart im Demo-Modus.
