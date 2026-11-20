@@ -107,6 +107,14 @@ function ctxOf(p: ProfileEntry): Ctx {
 }
 /** Sitzung → Profil */
 const sessions = new Map<string, string>();
+/** Live-Verbindung → Sitzung, damit eine beendete Sitzung auch ihren offenen Live-Kanal verliert */
+const socketSid = new WeakMap<import('ws').WebSocket, string>();
+/** Sitzungen eines Profils beenden (außer `keep`) und deren Live-Verbindungen schließen */
+function dropSessions(profileId: string, keep?: string) {
+  for (const [sid, pid] of [...sessions]) if (pid === profileId && sid !== keep) sessions.delete(sid);
+  const c = ctxs.get(profileId);
+  if (c) for (const ws of c.sockets) { const sid = socketSid.get(ws); if (sid && !sessions.has(sid)) ws.close(4401, 'Abgemeldet'); }
+}
 
 
 // Nur Proxys im eigenen Netz dürfen die Absenderadresse (X-Forwarded-For) setzen.
@@ -286,6 +294,8 @@ app.post('/api/vault/recover', strict, async (req, reply) => {
   if (!(await guard(req, reply))) return;
   if (!c.vault.recover(code, salt, keyFrom(key))) { failed(req); return reply.code(401).send({ error: 'Wiederherstellungscode falsch' }); }
   c.pendingTotp = null;
+  // Wiederherstellung heißt: Zugang verloren. Alle anderen Geräte abmelden, auch ein mögliches fremdes.
+  dropSessions(c.p.id);
   newSession(reply, req, c.p.id);
   return { ok: true };
 });
@@ -300,7 +310,9 @@ app.get('/api/profiles/:id/avatar', async (req, reply) => {
 });
 
 app.post('/api/logout', async (req, reply) => {
+  const pid = req.cookies.sid ? sessions.get(req.cookies.sid) : undefined;
   if (req.cookies.sid) sessions.delete(req.cookies.sid);
+  if (pid) dropSessions(pid, req.cookies.sid); // übrige Sitzungen bleiben, nur der Live-Kanal dieser Sitzung geht zu
   reply.clearCookie('sid', { path: '/' });
   return { ok: true };
 });
@@ -317,9 +329,15 @@ app.addHook('preHandler', async (req, reply) => {
   if (!authed(req)) return reply.code(401).send({ error: 'Nicht angemeldet' });
 });
 
-app.post('/api/vault/password', async (req) => {
-  const { salt, key } = req.body as { salt: string; key: string };
-  C(req).vault.changePassword(salt, keyFrom(key));
+// Altes Passwort nötig: Wer nur eine fremde, offene Sitzung hat, soll den Besitzer nicht aussperren können
+app.post('/api/vault/password', strict, async (req, reply) => {
+  const { salt, key, oldKey } = req.body as { salt: string; key: string; oldKey?: string };
+  const c = C(req);
+  if (!(await guard(req, reply))) return;
+  if (!c.vault.check(keyFrom(oldKey))) { failed(req); return reply.code(401).send({ error: 'Aktuelles Passwort falsch' }); }
+  c.vault.changePassword(salt, keyFrom(key));
+  // Andere Geräte müssen sich mit dem neuen Passwort neu anmelden
+  dropSessions(c.p.id, req.cookies.sid);
   return { ok: true };
 });
 app.post('/api/vault/comfort', async (req) => {
@@ -346,7 +364,7 @@ app.post('/api/2fa/enable', strict, async (req, reply) => {
   c.lastTotpStep = step;
   c.pendingTotp = null;
   // Alle anderen Geräte dieses Profils abmelden, sie müssen sich mit Code neu anmelden
-  for (const [sid, pid] of [...sessions]) if (pid === c.p.id && sid !== req.cookies.sid) sessions.delete(sid);
+  dropSessions(c.p.id, req.cookies.sid);
   return { ok: true, trust: trustDevice(reply, req, c) };
 });
 app.post('/api/2fa/disable', strict, async (req, reply) => {
@@ -506,7 +524,9 @@ app.delete('/api/chats/:id/avatar', async (req) => {
 app.post('/api/chats/:id/read', async (req) => { await H(req).markRead((req.params as any).id); return { ok: true }; });
 app.get('/api/chats/:id/messages', async (req) => {
   const q = req.query as { before?: string; limit?: string };
-  return H(req).store.listMessages((req.params as any).id, q.before ? Number(q.before) : undefined, Math.min(Number(q.limit ?? 60), 200));
+  // Unsinnige Werte (NaN, negativ) nicht an SQLite durchreichen, sonst gibt es einen 500er statt Nachrichten
+  const before = Number(q.before), limit = Math.trunc(Number(q.limit ?? 60));
+  return H(req).store.listMessages((req.params as any).id, before > 0 ? before : undefined, limit > 0 ? Math.min(limit, 200) : 60);
 });
 app.post('/api/chats/:id/history', async (req) => { await H(req).loadHistory((req.params as any).id); return { ok: true }; });
 /** Senden, bei eingeschalteter Live-Übersetzung in der Sprache des Chatpartners; das deutsche Original bleibt sichtbar */
@@ -1536,6 +1556,7 @@ app.register(async (f) => {
     const c = authed(req);
     if (!c) { socket.close(4401, 'Nicht angemeldet'); return; }
     c.sockets.add(socket);
+    if (req.cookies.sid) socketSid.set(socket, req.cookies.sid);
     socket.on('close', () => c.sockets.delete(socket));
     socket.on('message', (d) => {
       try {
