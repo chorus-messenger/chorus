@@ -979,8 +979,10 @@ app.delete('/api/planned/:id', async (req) => { P(req).remove((req.params as any
 app.post('/api/planned/:id/now', async (req) => {
   const p = P(req).list().find((x) => x.id === (req.params as any).id);
   if (!p) throw Object.assign(new Error('Nicht gefunden'), { statusCode: 404 });
-  await sendMaybeTranslated(H(req), A(req), p.chatId, p.text, p.replyTo ?? null, !!p.translate);
+  // Erst aus der Liste nehmen, dann senden: sonst kann der Planer denselben Eintrag gleichzeitig senden (doppelte Nachricht)
   P(req).remove(p.id);
+  try { await sendMaybeTranslated(H(req), A(req), p.chatId, p.text, p.replyTo ?? null, !!p.translate); }
+  catch (e: any) { if (!e?.shown) P(req).restore(p, String(e?.message ?? e)); throw e; }
   return { ok: true };
 });
 
@@ -1609,7 +1611,7 @@ if (existsSync(WEB_DIR)) {
 app.setErrorHandler((err: any, _req, reply) => {
   const code = err.statusCode && err.statusCode >= 400 ? err.statusCode : 500;
   if (code >= 500) app.log.error(err);
-  reply.code(code).send({ error: err.message || (code >= 500 ? 'Unbekannter Fehler auf dem Server' : 'Fehler') });
+  reply.code(code).send({ error: err.message || (code >= 500 ? 'Unbekannter Fehler auf dem Server' : 'Fehler'), ...(err.shown ? { shown: true } : {}) });
 });
 
 for (const p of registry.all()) {

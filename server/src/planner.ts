@@ -46,6 +46,8 @@ export class Planner {
     this.save(items);
     return it;
   }
+  /** Eintrag zurücklegen (z. B. wenn „Jetzt senden“ scheiterte, bevor die Nachricht im Chat stand) */
+  restore(p: Planned, error: string) { if (!this.list().some((x) => x.id === p.id)) this.save([...this.list(), { ...p, error }]); }
   remove(id: string) { this.save(this.list().filter((x) => x.id !== id)); }
 
   private async tick() {
