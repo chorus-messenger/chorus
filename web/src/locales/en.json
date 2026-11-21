@@ -1205,5 +1205,8 @@
  "Aktuelles Passwort": "Current password",
  "Aktuelles Passwort falsch": "Current password is wrong",
  "Passwort geändert. Andere Geräte müssen sich neu anmelden.": "Password changed. Other devices need to sign in again.",
- "Profil nicht gefunden": "Profile not found"
+ "Profil nicht gefunden": "Profile not found",
+ "Dieselbe Gruppe bei mehreren Messengern? Zusammengeführte Gruppen erscheinen als ein Eintrag mit gemeinsamem Verlauf. Darunter legst du fest, über welchen Messenger du schreibst.": "Same group on several messengers? Merged groups appear as one entry with a shared history. Below you choose which messenger you write through.",
+ "Gruppe suchen": "Search group",
+ "Gruppe auswählen …": "Choose group …"
 }
