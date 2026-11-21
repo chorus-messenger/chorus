@@ -89,7 +89,7 @@ export function ContactSheet({ chat, account, onClose, onChat }: { chat: Chat; a
               onChange={(e) => setNote(e.target.value)} onBlur={() => note !== (chat.note ?? '') && save({ note })} />
           </label>
 
-          {!group && <LinkSection chat={chat} onChat={onChat} />}
+          {chat.kind !== 'channel' && <LinkSection chat={chat} onChat={onChat} />}
 
           <div className="contact-actions">
             <button className="btn ghost" onClick={() => save({ muted: !chat.muted })}><Icon name={chat.muted ? 'bell' : 'belloff'} size={18} />{chat.muted ? T('Ton an') : T('Stumm')}</button>
@@ -104,7 +104,7 @@ export function ContactSheet({ chat, account, onClose, onChat }: { chat: Chat; a
   );
 }
 
-/** Dieselbe Person bei mehreren Messengern: Chats zu einem Kontakt zusammenführen */
+/** Dieselbe Person oder Gruppe bei mehreren Messengern: Chats zu einem Eintrag zusammenführen */
 function LinkSection({ chat, onChat }: { chat: Chat; onChat: (c: Chat) => void }) {
   const [data, setData] = useState<{ linked: Chat[]; suggestions: Chat[] } | null>(null);
   const [pick, setPick] = useState(false);
@@ -123,11 +123,13 @@ function LinkSection({ chat, onChat }: { chat: Chat; onChat: (c: Chat) => void }
   const openPick = async () => { setPick(true); if (!all.length) setAll(await api.chats().catch(() => [])); };
   const s = q.trim().toLowerCase();
   const linkedIds = new Set([chat.id, ...(data?.linked ?? []).map((c) => c.id)]);
-  const candidates = all.filter((c) => c.kind === 'direct' && !linkedIds.has(c.id) && (!s || c.title.toLowerCase().includes(s) || (c.info?.phone ?? '').replace(/\s/g, '').includes(s.replace(/\s/g, '')))).slice(0, 30);
+  const candidates = all.filter((c) => c.kind === chat.kind && !linkedIds.has(c.id) && (!s || c.title.toLowerCase().includes(s) || (c.info?.phone ?? '').replace(/\s/g, '').includes(s.replace(/\s/g, '')))).slice(0, 30);
   return (
     <div className="link-section">
       <h4>{T('Auch bei anderen Messengern')}</h4>
-      <p className="muted small">{T('Zusammengeführte Chats erscheinen als ein Kontakt mit gemeinsamem Verlauf. Darunter legst du fest, über welchen Messenger du antwortest.')}</p>
+      <p className="muted small">{chat.kind === 'group'
+        ? T('Dieselbe Gruppe bei mehreren Messengern? Zusammengeführte Gruppen erscheinen als ein Eintrag mit gemeinsamem Verlauf. Darunter legst du fest, über welchen Messenger du schreibst.')
+        : T('Zusammengeführte Chats erscheinen als ein Kontakt mit gemeinsamem Verlauf. Darunter legst du fest, über welchen Messenger du antwortest.')}</p>
       {data?.linked.map((c) => (
         <div key={c.id} className="contact-row">
           <span className="dot big" style={{ background: NETWORKS[c.network].color }} />
@@ -160,10 +162,10 @@ function LinkSection({ chat, onChat }: { chat: Chat; onChat: (c: Chat) => void }
         </div>
       ))}
       {!pick ? (
-        <button className="btn small ghost" onClick={openPick}><Icon name="link" size={16} /> {T('Chat auswählen …')}</button>
+        <button className="btn small ghost" onClick={openPick}><Icon name="link" size={16} /> {chat.kind === 'group' ? T('Gruppe auswählen …') : T('Chat auswählen …')}</button>
       ) : (
         <div className="link-pick">
-          <input className="input" autoFocus placeholder={T('Name oder Nummer suchen')} value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="input" autoFocus placeholder={chat.kind === 'group' ? T('Gruppe suchen') : T('Name oder Nummer suchen')} value={q} onChange={(e) => setQ(e.target.value)} />
           <ul>
             {candidates.map((c) => (
               <li key={c.id}><button onClick={() => link(c)}><span className="dot" style={{ background: NETWORKS[c.network].color }} /><b>{c.title}</b><small>{NETWORKS[c.network].name}</small></button></li>

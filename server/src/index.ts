@@ -1474,28 +1474,31 @@ app.post('/api/search/ai', async (req) => {
 app.get('/api/search/ai', async (req) => ({ all: H(req).store.getSetting('aiSearchAll', false) }));
 app.put('/api/search/ai', async (req) => { H(req).store.setSetting('aiSearchAll', !!(req.body as any)?.all); return { all: !!(req.body as any)?.all }; });
 
-// ---------- Kontakte über Messenger hinweg zusammenführen ----------
+// ---------- Kontakte und Gruppen über Messenger hinweg zusammenführen ----------
 const digits = (s?: string | null) => (s ?? '').replace(/[^\d]/g, '').slice(-9);
 function phoneOf(c: Chat): string {
   if (c.info?.phone) return digits(c.info.phone);
   const r = c.remoteId.split('@')[0];
   return /^\+?\d{7,}$/.test(r) ? digits(r) : '';
 }
+const linkable = (c: Chat) => c.kind === 'direct' || c.kind === 'group';
 app.get('/api/chats/:id/link', async (req) => {
   const h = H(req);
   const c = h.store.getChat((req.params as any).id);
   if (!c) throw Object.assign(new Error('Chat nicht gefunden'), { statusCode: 404 });
   const linked = c.link ? h.store.linkedIds(c.link).filter((x) => x !== c.id).map((x) => h.store.getChat(x)).filter(Boolean) : [];
-  const ph = phoneOf(c), name = c.title.trim().toLowerCase();
-  const suggestions = h.store.listChats().filter((o) => o.id !== c.id && o.kind === 'direct' && (!c.link || o.link !== c.link)
-    && ((ph && phoneOf(o) === ph) || (name.length > 2 && o.title.trim().toLowerCase() === name))).slice(0, 10);
+  // Gruppen: nur gleicher Name (ohne Emojis/Satzzeichen), Einzelchats auch gleiche Nummer
+  const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const ph = c.kind === 'direct' ? phoneOf(c) : '', name = norm(c.title);
+  const suggestions = linkable(c) ? h.store.listChats().filter((o) => o.id !== c.id && o.kind === c.kind && (!c.link || o.link !== c.link)
+    && ((ph && phoneOf(o) === ph) || (name.length > 2 && norm(o.title) === name))).slice(0, 10) : [];
   return { linked, suggestions };
 });
 app.post('/api/chats/:id/link', async (req) => {
   const h = H(req);
   const a = h.store.getChat((req.params as any).id), b = h.store.getChat(String((req.body as any)?.other ?? ''));
   if (!a || !b || a.id === b.id) throw Object.assign(new Error('Chat nicht gefunden'), { statusCode: 404 });
-  if (a.kind !== 'direct' || b.kind !== 'direct') throw Object.assign(new Error('Nur Einzelchats lassen sich zusammenführen.'), { statusCode: 400 });
+  if (!linkable(a) || a.kind !== b.kind) throw Object.assign(new Error('Nur Einzelchats mit Einzelchats und Gruppen mit Gruppen lassen sich zusammenführen.'), { statusCode: 400 });
   const link = a.link || b.link || randomUUID().slice(0, 12);
   // Hatte b schon eine eigene Gruppe, die ganze Gruppe mitnehmen
   for (const id of [a.id, b.id, ...(b.link && b.link !== link ? h.store.linkedIds(b.link) : [])]) h.store.setLink(id, link);
